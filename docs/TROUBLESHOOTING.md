@@ -6,19 +6,18 @@ Guia rápido para diagnosticar falhas de alimentação, gravação no SD, leitur
 
 ## 🔍 Diagnóstico Rápido
 
-### LED de funcionamento (`GPIO4`)
+### LED de funcionamento (`GPIO19`)
 
 | Estado do LED | Significado | Ação |
 | ------------- | ----------- | ---- |
 | Aceso | Sistema gravando no SD | Operação normal |
 | Apagado durante gravação esperada | Sem escrita no arquivo atual | Verificar SD e fluxo de gravação |
 
-### Botões físicos
+### Botão TARE
 
 | Botão | Pino | Função esperada |
 | ----- | ---- | --------------- |
-| Botão 1 | `GPIO32` | TARE da célula de carga |
-| Botão 2 | `GPIO33` | Iniciar novo arquivo no SD |
+| Botão TARE | `GPIO33` | TARE da célula de carga |
 
 ## 🚨 Problemas Comuns e Soluções
 
@@ -51,7 +50,7 @@ Soluções:
 
 ```
 1. Verificar formatação FAT32
-2. Verificar conexões SPI: CS(5), MOSI(23), MISO(19), SCK(18)
+2. Verificar conexões SPI: CS(5), MOSI(27), MISO(23), SCK(25)
 3. Testar outro cartão SD
 4. Verificar alimentação e GND do módulo SD
 ```
@@ -67,9 +66,9 @@ Sintomas:
 Soluções:
 
 ```
-1. Verificar DT(GPIO26) e SCK(GPIO27)
+1. Verificar DT(GPIO4) e SCK(GPIO18)
 2. Verificar ligação da célula no HX711
-3. Executar TARE pelo botão GPIO32 e por comando serial (TARE)
+3. Executar TARE pelo botão GPIO33 e por comando serial (TARE)
 4. Repetir calibração com peso conhecido
 ```
 
@@ -95,13 +94,12 @@ Soluções:
 Sintomas:
 
 - Botão de TARE não responde
-- Botão de novo arquivo não cria novo log
 
 Soluções:
 
 ```
 1. Conferir ligação dos botões para GND
-2. Conferir pinos corretos: GPIO32 (TARE), GPIO33 (novo arquivo)
+2. Conferir pino correto: GPIO33 (TARE)
 3. Verificar mau contato no botão/chicote
 4. Testar acionamento com monitor serial aberto
 ```

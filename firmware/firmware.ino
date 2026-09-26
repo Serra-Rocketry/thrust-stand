@@ -1,5 +1,4 @@
 // INCLUSÃO DE BIBLIOTECAS
-#include <Wire.h>
 #include <HX711.h>
 #include <FS.h>
 #include <SD.h>
@@ -12,56 +11,72 @@
 #include "Pressure.h"
 
 // Definições de pinos e constantes
-#define LED_PIN 4     // Pino do LED
-#define CS_PIN 5      // Pino do cartão SD
-#define BUZZER_PIN 33 // Pino do buzzer
-#define BTN_PIN 32    // Pino do botão
-#define CELULA_DT_PIN 26  // Pino de dados da célula de carga
-#define CELULA_SCK_PIN 27 // Pino de clock da célula de carga
+#define LED_PIN 19        // Pino do LED
+#define CS_PIN 5          // Pino do cartão SD (CS)
+#define SD_SCK_PIN 25     // Pino SCK do SD
+#define SD_MISO_PIN 23    // Pino MISO do SD
+#define SD_MOSI_PIN 27    // Pino MOSI do SD
+#define BUZZER_PIN 32     // Pino do buzzer
+#define BTN_PIN 33        // Pino do botão
+#define CELULA_DT_PIN 4   // Pino de dados da célula de carga (DAT)
+#define CELULA_SCK_PIN 18 // Pino de clock da célula de carga (CLK)
 #define PRESSURE_PIN 35   // Pino do sensor de pressão
-#define INTERVALO 100     // Precisão Leitura Dados milissegundos
+#define INTERVALO 1       // Intervalo de leitura em milissegundos
 
-// Sensores analógicos no ESP32 podem variar com atenuação/referência.
-// Ajuste estes parâmetros ao seu hardware real para obter leituras coerentes.
+// Instância SPI customizada para o SD (SCK=25, MISO=23, MOSI=27, CS=5)
+SPIClass spiSD(VSPI);
 
 // Variáveis globais
 const float VinPressure = 5.0;    // Tensão que alimenta o sensor
 const float VminPressure = 0.27;  // Tensão de saída em 0 MPa
 const float VmaxPressure = 4.5;   // Tensão de saída em 10 MPa
 const float maxPressure = 10.0;   // Pressão máxima do sensor em MPa
-const float R1 = 2200.0;          // Resistor conectado entre o sensor e o pino do ESP32
-const float R2 = 3300.0;          // Resistor conectado entre o pino do ESP32 e o GND
+const float R1 = 2200.0;          // Resistor entre sensor e pino ESP32
+const float R2 = 3300.0;          // Resistor entre pino ESP32 e GND
 const int RESOLUCAO_ADC = 4095;   // ESP32 tem ADC de 12 bits (2^12 - 1)
 const float TENSAO_MAX_ADC = 3.3; // Tensão de referência do ADC do ESP32
-float maxValues[2] = {0.0, 0.0};  // Vetor leituras de pico (peso, pressão)
+float maxValues[2] = {0.0, 0.0};  // Leituras de pico (peso, pressão)
 unsigned long previousMillis = 0; // Controle de tempo
-bool selectLoop = false;          // Modo de operação
-float loadFactor = 0.0;           // Valor encontrado na calibração
-String filedir = "";              // Arquivo
+float loadFactor = 0.0;           // Fator de calibração
+String filedir = "";              // Caminho do arquivo
 String leitura = "";              // Leitura dos dados
 
 enum StorageType { STORAGE_NONE, STORAGE_SD, STORAGE_LITTLEFS };
 StorageType storageType = STORAGE_NONE;
 
-// Estado do modo de configuração (calibração)
 static bool configMode = false;
 
 // Instanciação de objetos
-Pushbutton button(BTN_PIN);                                                                                                  // Botão
-PressureSensor pressureSensor(PRESSURE_PIN, R1, R2, RESOLUCAO_ADC, TENSAO_MAX_ADC, VminPressure, VmaxPressure, maxPressure); // Sensor de pressão
+Pushbutton button(BTN_PIN);
+PressureSensor pressureSensor(PRESSURE_PIN, R1, R2, RESOLUCAO_ADC, TENSAO_MAX_ADC, VminPressure, VmaxPressure, maxPressure);
+HX711 escala;
+BluetoothSerial SerialBT;
+Preferences preferences;
 
-HX711 escala;                                                                                                                // Célula de carga
-BluetoothSerial SerialBT;                                                                                                    // Bluetooth
-Preferences preferences;                                                                                                     // Preferências salvas
+// Declarações antecipadas
+void processCommand(String command);
+void setLoadFactor(float factor);
+void buzzSignal(String signal);
+bool setupStorage();
+bool setupStorageAndFile();
+bool setupHX711();
+void logData(unsigned long ms);
+bool writeFile(const String &path, const String &message);
+void appendFile(const String &path, const String &message);
+void printToSerials(const String &message);
+void staticTest();
+String generateFileName();
 
 void setup()
 {
-  // Inicialização da comunicação serial
   Serial.begin(115200);
   SerialBT.begin("ESP32_BT");
 
   preferences.begin("app", false);
-  loadFactor = preferences.getFloat("loadFactor", 277306.0);
+  loadFactor = preferences.getFloat("loadFactor", -284.6);
+
+  Serial.println("=== BOOT ===");
+  printToSerials("loadFactor carregado: " + String(loadFactor, 4));
 
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
@@ -69,14 +84,19 @@ void setup()
 
   pressureSensor.begin();
 
-  if (setupStorageAndFile() && setupHX711())
+  bool sdOk = setupStorageAndFile();
+  bool hx711Ok = setupHX711();
+
+  if (sdOk && hx711Ok)
   {
     printToSerials("Sistema configurado. Transmitindo...");
     buzzSignal("Sucesso");
   }
   else
   {
-    printToSerials("Falha crítica. Reiniciando...");
+    if (!sdOk)   printToSerials("ERRO: Falha no storage.");
+    if (!hx711Ok) printToSerials("ERRO: Falha no HX711.");
+    printToSerials("Falha critica. Reiniciando...");
     buzzSignal("Alerta");
     delay(3000);
     ESP.restart();
@@ -92,107 +112,147 @@ void loop()
 
   if (button.getSingleDebouncedPress())
   {
-    buzzSignal("Beep");
-    printToSerials("Célula Zerada!");
-    escala.tare();
+    if (escala.wait_ready_timeout(1000))
+    {
+      buzzSignal("Beep");
+      printToSerials("Celula Zerada!");
+      escala.tare();
+    }
+    else
+    {
+      printToSerials("HX711 nao pronto, TARE ignorado.");
+    }
   }
 
   if (Serial.available())
   {
     String command = Serial.readStringUntil('\n');
-    command.trim(); // Remove espaços e quebras de linha
-
-    if (command.equalsIgnoreCase("TARE"))
-    {
-      buzzSignal("Beep");
-      printToSerials("Célula Zerada!");
-      escala.tare();
-      return;
-    }
-
-    if (command.startsWith("INIT CONFIG"))
-    {
-      escala.tare();
-      configMode = true;
-      Serial.println("Aguardando fator de carga...");
-      return;
-    }
-
-    if (configMode && command.startsWith("SET LOAD FACTOR"))
-    {
-      int lastSpaceIndex = command.lastIndexOf(' ');
-      if (lastSpaceIndex != -1)
-      {
-        String factorStr = command.substring(lastSpaceIndex + 1);
-        float factor = factorStr.toFloat();
-        if (!isnan(factor) && factor != 0.0)
-        {
-          setLoadFactor(factor);
-          configMode = false;
-          Serial.println("Modo configuração finalizado");
-        }
-        else
-        {
-          printToSerials("Valor inválido. Tente novamente.");
-          buzzSignal("Alerta");
-        }
-      }
-      return;
-    }
+    command.trim();
+    processCommand(command);
   }
 
-  // Stream de calibração: RAW contínuo enquanto aguarda o fator
+  if (SerialBT.available())
+  {
+    String command = SerialBT.readStringUntil('\n');
+    command.trim();
+    processCommand(command);
+  }
+
+  // Stream RAW de calibração
   if (configMode)
   {
-    Serial.println(escala.get_value(1));
-    delay(100);
+    if (escala.wait_ready_timeout(1000))
+    {
+      long raw = escala.get_value(1);
+      Serial.println(raw);
+      SerialBT.println(raw);
+    }
+    delay(200);
   }
 }
 
-// Configuração do fator de carga
+void processCommand(String command)
+{
+  if (command.equalsIgnoreCase("TARE"))
+  {
+    if (escala.wait_ready_timeout(1000))
+    {
+      buzzSignal("Beep");
+      printToSerials("Celula Zerada!");
+      escala.tare();
+    }
+    else
+    {
+      printToSerials("HX711 nao pronto, TARE ignorado.");
+    }
+    return;
+  }
+
+  if (command.equalsIgnoreCase("GET LOAD FACTOR"))
+  {
+    printToSerials("loadFactor atual: " + String(loadFactor, 4));
+    return;
+  }
+
+  if (command.startsWith("INIT CONFIG"))
+  {
+    if (escala.wait_ready_timeout(1000))
+    {
+      escala.tare();
+      configMode = true;
+      printToSerials("Modo calibracao ativo. Aguardando SET LOAD FACTOR...");
+    }
+    else
+    {
+      printToSerials("HX711 nao pronto. Verifique conexoes.");
+    }
+    return;
+  }
+
+  if (configMode && command.startsWith("SET LOAD FACTOR"))
+  {
+    int lastSpaceIndex = command.lastIndexOf(' ');
+    if (lastSpaceIndex != -1)
+    {
+      String factorStr = command.substring(lastSpaceIndex + 1);
+      float factor = factorStr.toFloat();
+      if (!isnan(factor) && factor != 0.0)
+      {
+        setLoadFactor(factor);
+        configMode = false;
+        printToSerials("Modo calibracao finalizado.");
+      }
+      else
+      {
+        printToSerials("Valor invalido. Tente novamente.");
+        buzzSignal("Alerta");
+      }
+    }
+    return;
+  }
+}
+
 void setLoadFactor(float factor)
 {
   loadFactor = factor;
   escala.set_scale(loadFactor);
   preferences.putFloat("loadFactor", loadFactor);
-  printToSerials("Fator de carga atualizado: " + String(loadFactor, 2));
+  printToSerials("Fator de carga atualizado: " + String(loadFactor, 4));
   buzzSignal("Sucesso");
 }
 
-// Sinalização com o buzzer
 void buzzSignal(String signal)
 {
-  int frequency = 1000;   // Frequência do tom
-  if (signal == "Alerta") // Alerta de erro em alguma configuração
+  int frequency = 1000;
+  if (signal == "Alerta")
   {
     for (int i = 0; i < 5; i++)
     {
       tone(BUZZER_PIN, frequency, 200);
-      delay(200 + 150);
+      delay(350);
     }
   }
-  else if (signal == "Sucesso") // Sinal de sucesso na configuração
+  else if (signal == "Sucesso")
   {
     for (int i = 0; i < 3; i++)
     {
       tone(BUZZER_PIN, frequency, 100);
-      delay(100 + 100);
+      delay(200);
     }
   }
   else if (signal == "Ativado")
   {
     tone(BUZZER_PIN, frequency, 500);
   }
-  else if (signal == "Beep") // Beep de funcionamento padrão
+  else if (signal == "Beep")
   {
     tone(BUZZER_PIN, frequency, 50);
   }
   else
   {
-    Serial.println("Sinal inválido!");
+    Serial.println("Sinal invalido!");
   }
 }
-
 
 String generateFileName()
 {
@@ -217,17 +277,19 @@ String generateFileName()
   return "/overflow.txt";
 }
 
-// Configuração do Storage (SD com LittleFS fallback)
 bool setupStorage()
 {
   Serial.println("Inicializando SD...");
-  if (SD.begin(CS_PIN) && SD.cardType() != CARD_NONE)
+  spiSD.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, CS_PIN);
+  delay(100); // aguarda estabilização do SPI
+
+  if (SD.begin(CS_PIN, spiSD) && SD.cardType() != CARD_NONE)
   {
     storageType = STORAGE_SD;
     Serial.println("SD iniciado!");
     Serial.printf("Tipo: %s\n",
-      SD.cardType() == CARD_MMC ? "MMC" :
-      SD.cardType() == CARD_SD ? "SDSC" :
+      SD.cardType() == CARD_MMC  ? "MMC"  :
+      SD.cardType() == CARD_SD   ? "SDSC" :
       SD.cardType() == CARD_SDHC ? "SDHC" : "UNKNOWN");
     return true;
   }
@@ -245,17 +307,13 @@ bool setupStorage()
   }
 
   Serial.println("ERRO: Nenhum storage disponivel!");
-  yield();
   return false;
 }
 
-// Configuração do Storage e Arquivo
 bool setupStorageAndFile()
 {
   if (!setupStorage())
-  {
     return false;
-  }
 
   filedir = generateFileName();
   Serial.print("Arquivo: ");
@@ -271,47 +329,62 @@ bool setupStorageAndFile()
   return true;
 }
 
-// Configuração da célula de carga HX711
 bool setupHX711()
 {
   Serial.println("Iniciando HX711...");
   escala.begin(CELULA_DT_PIN, CELULA_SCK_PIN);
-  Serial.println("HX711.begin OK");
 
+  unsigned long timeout = millis();
+  while (!escala.is_ready())
+  {
+    if (millis() - timeout > 5000)
+    {
+      Serial.println("ERRO: HX711 nao respondeu (timeout 5s). Verifique DT=4, SCK=18.");
+      return false;
+    }
+    delay(10);
+  }
+
+  Serial.println("HX711 detectado OK.");
   escala.set_scale(loadFactor);
-  Serial.println("set_scale OK");
+  Serial.print("set_scale com fator: ");
+  Serial.println(loadFactor, 4);
 
-  escala.tare();
+  // Warmup: descarta as primeiras leituras para estabilizar
+  Serial.println("Aguardando estabilizacao...");
+  for (int i = 0; i < 10; i++)
+  {
+    escala.get_value(1);
+    delay(100);
+  }
+
+  escala.tare(10); // média de 10 amostras para tara precisa
   Serial.println("tare OK");
 
   printToSerials("HX711 conectado");
   return true;
 }
 
-// Função para registrar e imprimir os dados do momento
-// Formato: Tempo (ms), Empuxo (Kg), Pressão (MPa)
-void logData(unsigned long millis)
+void logData(unsigned long ms)
 {
-  float peso = escala.get_units();
+  if (!escala.wait_ready_timeout(1000))
+  {
+    Serial.println("AVISO: HX711 timeout em logData, pulando leitura.");
+    return;
+  }
+
+  float peso = abs(escala.get_units(1)); // 1 amostra por leitura
   float pressao = pressureSensor.readMPa();
 
-  if (peso > maxValues[0])
-  {
-    maxValues[0] = peso;
-  }
+  if (peso > maxValues[0]) maxValues[0] = peso;
+  if (pressao > maxValues[1]) maxValues[1] = pressao;
 
-  if (pressao > maxValues[1])
-  {
-    maxValues[1] = pressao;
-  }
-
-  leitura = String(millis) + "," + String(peso, 6) + "," + String(pressao);
+  leitura = String(ms) + "," + String(peso, 6) + "," + String(pressao, 6);
 
   printToSerials(leitura);
   appendFile(filedir, leitura);
 }
 
-// Escrita de dados em um arquivo
 bool writeFile(const String &path, const String &message)
 {
   File file;
@@ -326,25 +399,27 @@ bool writeFile(const String &path, const String &message)
 
   if (!file)
   {
-    printToSerials("Falha ao abrir o arquivo");
+    printToSerials("Falha ao abrir arquivo para escrita: " + path);
     return false;
   }
-  if (file.print(message))
+
+  bool ok = file.print(message);
+  file.close();
+
+  if (ok)
   {
     digitalWrite(LED_PIN, HIGH);
+    Serial.println("SD: arquivo criado OK");
   }
   else
   {
     printToSerials("Falha ao escrever no arquivo");
     digitalWrite(LED_PIN, LOW);
-    file.close();
-    return false;
   }
-  file.close();
-  return true;
+
+  return ok;
 }
 
-// Anexação de dados em um arquivo
 void appendFile(const String &path, const String &message)
 {
   File file;
@@ -354,53 +429,42 @@ void appendFile(const String &path, const String &message)
   } else if (storageType == STORAGE_LITTLEFS) {
     file = LittleFS.open(path, FILE_APPEND);
   } else {
+    Serial.println("ERRO: storage nao inicializado em appendFile");
     return;
   }
 
   if (!file)
   {
-    printToSerials("Falha ao abrir o arquivo");
+    printToSerials("Falha ao abrir arquivo para append: " + path);
     return;
   }
-  if (file.print(message + "\n"))
+
+  bool ok = file.print(message + "\n");
+  file.close();
+
+  if (ok)
   {
     digitalWrite(LED_PIN, HIGH);
   }
-  else
+  else 
   {
-    printToSerials("Falha ao escrever no arquivo");
+    printToSerials("Falha ao gravar linha no arquivo");
     digitalWrite(LED_PIN, LOW);
   }
-  file.close();
 }
 
-// Criação de diretório
-void createDir(fs::FS &fs, const String &path)
-{
-  if (fs.mkdir(path))
-  {
-    printToSerials("Dir created");
-  }
-  else
-  {
-    printToSerials("mkdir failed");
-  }
-}
-
-// Função para imprimir na Serial e SerialBT
 void printToSerials(const String &message)
 {
   Serial.println(message);
   SerialBT.println(message);
 }
 
-// Função de teste estático
 void staticTest()
 {
   unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis > INTERVALO)
+  if (currentMillis - previousMillis >= INTERVALO)
   {
-    logData(currentMillis);
     previousMillis = currentMillis;
+    logData(currentMillis);
   }
 }

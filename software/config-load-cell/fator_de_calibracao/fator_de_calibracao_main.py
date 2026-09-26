@@ -179,7 +179,7 @@ def extend_ui(ui):
         ui.display_status.setText('Iniciando calibração...')
         ui.progressBar.setValue(0)
 
-        thread = SamplerThread(com, n_samples=100)
+        thread = SamplerThread(com, n_samples=200)
         thread.progress.connect(on_progress)
         thread.sample_received.connect(on_sample_received)
         thread.finished.connect(on_finished)

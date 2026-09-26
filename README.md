@@ -31,7 +31,7 @@ git clone https://github.com/ViniciusCMB/thrust-stand.git
 
 ## 🔧 Pré-requisitos
 
-- Hardware: ESP32 DevKit V1, célula de carga + HX711, sensor de pressão (com divisor resistivo), módulo microSD (SPI), 2 botões tácteis (`GPIO32` para TARE e `GPIO33` para novo arquivo), LED com resistor de limitação
+- Hardware: ESP32 DevKit V1, célula de carga + HX711, sensor de pressão (com divisor resistivo), módulo microSD (SPI), botão tátil (`GPIO33` para TARE), LED com resistor de limitação, buzzer
 - Software: Arduino IDE 2.0+
 - Bibliotecas: ver `docs/FIRMWARE.md`
 

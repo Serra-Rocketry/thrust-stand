@@ -9,7 +9,7 @@ Este documento descreve os protocolos de comunicação e as interfaces de contro
 | Protocolo  | Tipo     | Velocidade  | Alcance | Caso de Uso                    |
 | ---------- | -------- | ----------- | ------- | ------------------------------ |
 | Serial USB | Fio      | 115200 baud | Local   | Configuração, calibração, debug |
-| Bluetooth  | Wireless | 115200 baud | ~10 m   | Telemetria/monitoramento       |
+| Bluetooth  | Wireless | 115200 baud | ~10 m   | Telemetria, comandos, monitoramento |
 
 ## 💻 Comunicação Serial/Bluetooth
 
@@ -39,7 +39,7 @@ RESPOSTA: Aguardando fator de carga...
 USO: entra no modo de calibração da célula de carga
 
 COMANDO: SET LOAD FACTOR <valor>
-EXEMPLO: SET LOAD FACTOR 277306.0
+EXEMPLO: SET LOAD FACTOR -284.6
 RESPOSTA: Fator de carga atualizado
 USO: salva o fator de calibração na memória persistente
 ```
@@ -50,15 +50,19 @@ USO: salva o fator de calibração na memória persistente
 COMANDO: TARE
 RESPOSTA: Célula Zerada!
 USO: zera a leitura atual da célula de carga
+
+COMANDO: GET LOAD FACTOR
+RESPOSTA: loadFactor atual: <valor>
+USO: consulta o fator de calibração atual sem entrar em modo de configuração
 ```
 
 ## 🕹️ Controles Físicos
 
 | Entrada física | Pino ESP32 | Função |
 | -------------- | ---------- | ------ |
-| Botão 1 | `GPIO32` | TARE da célula de carga |
-| Botão 2 | `GPIO33` | Iniciar novo arquivo de log no SD |
-| LED | `GPIO4` | Indicador de funcionamento (aceso ao gravar no SD) |
+| Botão TARE | `GPIO33` | TARE da célula de carga |
+| LED | `GPIO19` | Indicador de funcionamento (aceso ao gravar no SD) |
+| Buzzer | `GPIO32` | Sinalização sonora |
 
 ## 🎯 Exemplo de Interação
 

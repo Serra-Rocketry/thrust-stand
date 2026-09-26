@@ -6,9 +6,9 @@ Sistema embarcado baseado em ESP32 para aquisição de empuxo e pressão em test
 
 Controles físicos do esquemático atual:
 
-- `GPIO32`: botão para TARE (zerar a célula de carga)
-- `GPIO33`: botão para iniciar um novo arquivo de log no SD
-- `GPIO4`: LED de indicador de funcionamento (aceso durante gravação no SD)
+- `GPIO33`: botão para TARE (zerar a célula de carga)
+- `GPIO19`: LED de indicador de funcionamento (aceso durante gravação no SD)
+- `GPIO32`: buzzer de sinalização
 
 ## 🧩 Lista de Componentes (BOM)
 
@@ -21,7 +21,7 @@ Controles físicos do esquemático atual:
 | Módulo microSD            | 1          | Interface SPI                                 |
 | LED                       | 1          | 5mm, vermelho                                 |
 | Botão tátil (TARE)        | 1          | 6x6mm                                         |
-| Botão tátil (novo arquivo)| 1          | 6x6mm                                         |
+| Buzzer                    | 1          | Ativo, 5V                                     |
 | Resistores do divisor     | 2          | 2.2kΩ e 3.3kΩ                                 |
 | Resistor do LED           | 1          | 220Ω (valor típico)                           |
 | Fonte de alimentação      | 1          | 5V 2A (mínimo recomendado)                    |
@@ -30,23 +30,24 @@ Controles físicos do esquemático atual:
 
 | ESP32 | Função no sistema |
 | ----- | ----------------- |
-| `GPIO26` | HX711 `DT` |
-| `GPIO27` | HX711 `SCK` |
+| `GPIO4`  | HX711 `DT` |
+| `GPIO18` | HX711 `SCK` |
 | `GPIO35` | Entrada do sensor de pressão (via divisor resistivo) |
 | `GPIO5`  | microSD `CS` |
-| `GPIO23` | microSD `MOSI` |
-| `GPIO19` | microSD `MISO` |
-| `GPIO18` | microSD `SCK` |
-| `GPIO4`  | LED de gravação |
-| `GPIO32` | Botão TARE |
-| `GPIO33` | Botão novo arquivo |
+| `GPIO27` | microSD `MOSI` |
+| `GPIO23` | microSD `MISO` |
+| `GPIO25` | microSD `SCK` |
+| `GPIO19` | LED de gravação |
+| `GPIO32` | Buzzer |
+| `GPIO33` | Botão TARE |
 | `VIN`    | Alimentação 5V dos módulos |
 | `GND`    | Terra comum |
 
 Observações de ligação:
 
-- Botões: um terminal no GPIO correspondente e o outro no `GND`.
-- LED: ligado ao `GPIO4` com resistor em série.
+- Botão: um terminal no `GPIO33` e o outro no `GND`.
+- LED: ligado ao `GPIO19` com resistor em série.
+- Buzzer: ligado ao `GPIO32`.
 - Sensor de pressão: saída analógica passa por divisor resistivo antes de chegar ao `GPIO35`.
 
 ## 🛠️ Procedimento de Montagem
@@ -63,7 +64,7 @@ Observações de ligação:
 - Conecte módulo microSD (SPI)
 - Conecte sensor de pressão com divisor resistivo
 - Conecte LED de status
-- Conecte os dois botões (`GPIO32` e `GPIO33`)
+- Conecte o botão (`GPIO33`)
 
 3. Divisor resistivo para o sensor de pressão
 
@@ -94,8 +95,9 @@ Montagem completa:
 
 - [x] Divisor resistivo no sensor de pressão
 - [x] Terra comum entre todos os módulos
-- [x] Botões dedicados para TARE e novo arquivo
+- [x] Botão dedicado para TARE
 - [x] LED dedicado para indicação de gravação no SD
+- [x] Buzzer para sinalização
 - [ ] Isolamento contra vibrações
 - [ ] Proteção contra poeira e umidade
 
@@ -110,7 +112,6 @@ Montagem completa:
 
 ### Testes pós-montagem
 
-- Botão `GPIO32` realiza TARE
-- Botão `GPIO33` inicia novo arquivo
+- Botão `GPIO33` realiza TARE
 - LED acende durante gravação no SD
 - Leituras de empuxo e pressão estáveis

@@ -63,7 +63,7 @@ class Receiver():
     def close(self):
         self.serial.close()
 
-def get_samples(com: Receiver, n_samples: int = 10) -> list[int]:
+def get_samples(com: Receiver, n_samples: int = 200) -> list[int]:
 
     samples = []
     sample_count = 0
@@ -146,8 +146,15 @@ def main(argv: list[str]) -> int:
     port = choose_port_by_index()
     com = Receiver(port)
 
-    n_samples = int(input("Digite nº de amostras para calibrar a pesage:\n-> "))
+    n_samples = int(input("Digite nº de amostras para calibrar a pesage (recomendado: 200):\n-> "))
     expected_weight = int(input("Digite o peso esperado:\n-> "))
+
+    print(f"\nColoque o peso de {expected_weight} sobre a célula de carga.")
+    print("Aguarde...")
+    for i in range(5, 0, -1):
+        print(f"Iniciando leitura em {i} segundos...", end='\r')
+        time.sleep(1)
+    print("\nIniciando leitura das amostras...")
 
     samples = get_samples(com, n_samples=n_samples)
 

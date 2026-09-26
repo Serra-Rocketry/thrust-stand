@@ -13,7 +13,11 @@ public:
     }
 
     float readMPa() {
-        int adcValue = analogRead(_pin);
+        long sum = 0;
+        for (int i = 0; i < 10; i++) {
+            sum += analogRead(_pin);
+        }
+        int adcValue = sum / 10;
         float voltageAtPin = (adcValue / (float)_adcResolution) * _adcMaxVoltage;
         float sensorVoltage = voltageAtPin * (_resistor1 + _resistor2) / _resistor2;
         float pressureMPa = (sensorVoltage - _vOutMin) * _pMaxMPa / (_vOutMax - _vOutMin);

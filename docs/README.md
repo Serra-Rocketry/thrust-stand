@@ -76,9 +76,9 @@ graph TD;
 - Armazenamento: cartão SD (SPI), com fallback para LittleFS
 - Comunicação: Serial USB e Bluetooth
 - Controles físicos:
-  - Botão `GPIO32`: TARE
-  - Botão `GPIO33`: iniciar novo arquivo
-  - LED `GPIO4`: aceso durante gravação no SD
+  - Botão `GPIO33`: TARE
+  - LED `GPIO19`: aceso durante gravação no SD
+  - Buzzer `GPIO32`: sinalização
 
 ### Formatos de Dados
 
