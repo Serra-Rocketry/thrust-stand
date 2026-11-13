@@ -88,34 +88,20 @@ def enter_config_mode(com: Receiver, attempts: int = 5, timeout_s: float = 3.0) 
     return False
 
 def get_samples(com: Receiver, n_samples: int = 200) -> list[int]:
+    """Lê n_samples valores brutos do modo de calibração.
+
+    O próprio ESP controla o ritmo (uma leitura a cada 200 ms), então não
+    há espera aqui: esperar fazia ler valores antigos acumulados no buffer.
+    """
+    com.serial.reset_input_buffer()
 
     samples = []
-    sample_count = 0
-
-    time_between_samples_ms = 1000
-
-    while(com.check_connection() and sample_count < n_samples):
-
-        start_time_ns = time.time_ns()
-
-        raw = com.read_response()
-        value = try_parse_int(raw)
+    while com.check_connection() and len(samples) < n_samples:
+        value = try_parse_int(com.read_response())
         if value is None:
             continue
-
         samples.append(value)
-        sample_count += 1
-        print(f"Sample {sample_count}: {value}")
-
-        end_time_ns = time.time_ns()
-
-        elapsed_time_ns = (end_time_ns - start_time_ns)
-        elapsed_time_ms = int(elapsed_time_ns * (10**-6))
-
-        await_time_ms = (time_between_samples_ms - elapsed_time_ms)
-        if await_time_ms < 0: await_time_ms = 0
-
-        time.sleep(await_time_ms / 1000)
+        print(f"Sample {len(samples)}: {value}")
 
     return samples
 
@@ -170,22 +156,39 @@ def main(argv: list[str]) -> int:
     port = choose_port_by_index()
     com = Receiver(port)
 
-    n_samples = int(input("Digite nº de amostras para calibrar a pesage (recomendado: 200):\n-> "))
-    expected_weight = int(input("Digite o peso esperado:\n-> "))
+    n_samples = int(input("Digite nº de amostras para calibrar a pesagem (recomendado: 200):\n-> "))
+    expected_weight = float(input("Digite o peso real em kg (ex.: 10.5):\n-> ").replace(',', '.'))
 
-    print(f"\nColoque o peso de {expected_weight} sobre a célula de carga.")
-    print("Aguarde...")
-    for i in range(5, 0, -1):
-        print(f"Iniciando leitura em {i} segundos...", end='\r')
-        time.sleep(1)
-    print("\nIniciando leitura das amostras...")
+    # 1) Tara sem peso: o INIT CONFIG zera a célula
+    input("\nRetire todo o peso da célula de carga e aperte Enter para fazer a tara...")
+    if not enter_config_mode(com):
+        print("ERRO: o ESP não entrou no modo de calibração. Verifique a conexão.")
+        com.close()
+        return 1
+
+    # 2) Peso de referência
+    input(f"Tara feita. Coloque o peso de {expected_weight} kg, espere estabilizar e aperte Enter...")
+    print("Iniciando leitura das amostras...")
 
     samples = get_samples(com, n_samples=n_samples)
+    if not samples:
+        print("ERRO: nenhuma amostra recebida.")
+        com.close()
+        return 1
 
-    calibration_factor = get_calibration_factor(samples, float(expected_weight))
-
+    calibration_factor = get_calibration_factor(samples, expected_weight)
     print(f"Fator de Calibração: {calibration_factor}")
 
+    # 3) Salvar no ESP (sai do modo de calibração)
+    if input("Enviar este fator para o ESP? [s/N] -> ").strip().lower() == 's':
+        com.send_command(f'SET LOAD FACTOR {calibration_factor}\n'.encode('utf-8'))
+        time.sleep(0.5)
+        for _ in range(10):
+            line = com.read_response()
+            if line and try_parse_int(line) is None:
+                print(line)
+
+    com.close()
     return 0
 
 if __name__ == "__main__":
