@@ -132,8 +132,10 @@ void setup()
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(BTN_PIN, INPUT);
 
-  bool sdOk = setupStorageAndFile() && startRecording();
   bool adcOk = setupADS1256();
+  // O arquivo só é criado com o ADS1256 funcionando: antes, cada boot com
+  // falha (seguido de restart) deixava um arquivo vazio no cartão
+  bool sdOk = adcOk && setupStorageAndFile() && startRecording();
 
   if (sdOk && adcOk)
   {
@@ -142,8 +144,8 @@ void setup()
   }
   else
   {
-    if (!sdOk)  printToSerials("ERRO: Falha no storage.");
-    if (!adcOk) printToSerials("ERRO: Falha no ADS1256.");
+    if (!adcOk)     printToSerials("ERRO: Falha no ADS1256.");
+    else if (!sdOk) printToSerials("ERRO: Falha no storage.");
     printToSerials("Falha critica. Reiniciando...");
     buzzSignal("Alerta");
     delay(3000);
