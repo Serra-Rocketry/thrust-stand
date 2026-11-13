@@ -130,6 +130,10 @@ void setup()
 {
   Serial.begin(115200);
   SerialBT.begin("ESP32_BT");
+  // readStringUntil() espera até este tempo por um '\n': o padrão (1 s)
+  // pararia a aquisição se um comando chegasse sem quebra de linha
+  Serial.setTimeout(50);
+  SerialBT.setTimeout(50);
 
   preferences.begin("app", false);
   // Chave nova: a antiga ("loadFactor") guardava o fator do HX711, que não vale para o ADS1256
