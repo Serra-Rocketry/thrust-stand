@@ -55,7 +55,7 @@ Soluções:
 4. Verificar alimentação e GND do módulo SD
 ```
 
-### 3. ⚖️ Problemas com célula de carga / HX711
+### 3. ⚖️ Problemas com célula de carga / ADS1256
 
 Sintomas:
 
@@ -66,8 +66,8 @@ Sintomas:
 Soluções:
 
 ```
-1. Verificar DT(GPIO4) e SCK(GPIO18)
-2. Verificar ligação da célula no HX711
+1. Verificar SCLK(GPIO18), DOUT(GPIO4), DIN(GPIO13), CS(GPIO26) e DRDY(GPIO34)
+2. Verificar ligação da célula no ADS1256 (S+ em AIN0, S- em AIN1, E- no GND comum)
 3. Executar TARE pelo botão GPIO33 e por comando serial (TARE)
 4. Repetir calibração com peso conhecido
 ```
@@ -85,7 +85,7 @@ Soluções:
 ```
 1. Verificar alimentação do sensor
 2. Verificar divisor resistivo (2.2kΩ e 3.3kΩ)
-3. Medir tensão no GPIO35 (faixa esperada: 0-3.3V)
+3. Medir tensão na entrada AIN2 do ADS1256 (faixa esperada: 0-2.7V)
 4. Conferir GND comum entre sensor e ESP32
 ```
 
@@ -104,7 +104,48 @@ Soluções:
 4. Testar acionamento com monitor serial aberto
 ```
 
-### 6. 📡 Problemas de comunicação Serial/Bluetooth
+### 6. 🌡️ Problemas com o termopar (MAX31855)
+
+Sintomas:
+
+- Coluna `Temperatura` com `nan`
+- Aviso no boot: `termopar com falha (codigo N)`
+
+Códigos de falha:
+
+| Código | Significado |
+| ------ | ----------- |
+| 1 | Termopar desconectado (circuito aberto) |
+| 2 | Termopar em curto com GND |
+| 4 | Termopar em curto com VCC |
+| 128 | O MAX31855 não respondeu (verificar CS no GPIO21, SCK, SO e alimentação 3,3 V) |
+
+Soluções:
+
+```
+1. Conferir o encaixe do termopar nos bornes T+ / T-
+2. Conferir a polaridade (temperatura caindo ao aquecer = fios invertidos)
+3. Conferir CS(GPIO21), SCK(GPIO18) e SO(GPIO4)
+4. Termopar não deve encostar em metal ligado ao GND do circuito
+```
+
+### 7. 📉 Amostras perdidas
+
+Sintoma:
+
+- Aviso `AVISO: amostras perdidas (fila cheia): N`
+
+Causa: o cartão SD ficou travado por mais de ~2 s e a fila de amostras encheu.
+
+Soluções:
+
+```
+1. Usar um cartão SD de boa qualidade (classe 10 ou superior), formatado em FAT32
+2. Evitar cartões quase cheios
+3. Enviar BT OFF antes do teste para aliviar o processador
+```
+
+### 8. 📡 Problemas de comunicação Serial/Bluetooth
 
 Sintomas:
 
