@@ -25,6 +25,7 @@
 #define ADS_DRDY_PIN 34   // ADS1256 DRDY (pino só de entrada)
 #define INTERVALO 1      // Intervalo de leitura em milissegundos
 #define TARE_AMOSTRAS 50  // Leituras usadas na média da tara
+#define NVS_CHAVE_FATOR "fatorADS1256" // Chave do fator de calibração no NVS
 
 // Instância SPI customizada para o SD (SCK=25, MISO=23, MOSI=27, CS=5)
 SPIClass spiSD(VSPI);
@@ -40,6 +41,17 @@ const float maxPressure = 10.0;   // Pressão máxima do sensor em MPa
 const float R1 = 2200.0;          // Resistor entre sensor e entrada AIN2 do ADS1256
 const float R2 = 3300.0;          // Resistor entre AIN2 e GND
 const float ADS_VREF = 2.5;       // Referência de tensão do módulo ADS1256
+
+// Célula de carga SZ51X-500kg (certificado de calibração)
+const float CELULA_SENSIBILIDADE = 0.002; // 2 mV/V
+const float CELULA_EXCITACAO = 5.0;       // Tensão de excitação (V)
+const float CELULA_CAPACIDADE = 500.0;    // Capacidade (kg)
+
+// Fator teórico (contagens do ADC por kg), usado até a primeira calibração:
+// (V por kg na saída da célula) x (contagens por V no PGA 64)
+// = (0,002 x 5 / 500) x (8388607 / (2 x 2,5 / 64)) ~ 2147,5
+const float FATOR_TEORICO = (CELULA_SENSIBILIDADE * CELULA_EXCITACAO / CELULA_CAPACIDADE)
+                          * (8388607.0 / (2.0 * ADS_VREF / 64.0));
 float maxValues[2] = {0.0, 0.0};  // Leituras de pico (peso, pressão)
 unsigned long previousMillis = 0; // Controle de tempo
 float loadFactor = 0.0;           // Fator de calibração
@@ -92,7 +104,8 @@ void setup()
   SerialBT.begin("ESP32_BT");
 
   preferences.begin("app", false);
-  loadFactor = preferences.getFloat("loadFactor", -284.6);
+  // Chave nova: a antiga ("loadFactor") guardava o fator do HX711, que não vale para o ADS1256
+  loadFactor = preferences.getFloat(NVS_CHAVE_FATOR, FATOR_TEORICO);
 
   Serial.println("=== BOOT ===");
   printToSerials("loadFactor carregado: " + String(loadFactor, 4));
@@ -214,7 +227,7 @@ void processCommand(String command)
 void setLoadFactor(float factor)
 {
   loadFactor = factor;
-  preferences.putFloat("loadFactor", loadFactor);
+  preferences.putFloat(NVS_CHAVE_FATOR, loadFactor);
   printToSerials("Fator de carga atualizado: " + String(loadFactor, 4));
   buzzSignal("Sucesso");
 }
