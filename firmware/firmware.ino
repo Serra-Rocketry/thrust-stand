@@ -23,7 +23,8 @@
 #define ADS_DIN_PIN 13    // ADS1256 DIN  <- MOSI
 #define ADS_CS_PIN 26     // ADS1256 CS
 #define ADS_DRDY_PIN 34   // ADS1256 DRDY (pino só de entrada)
-#define INTERVALO 1      // Intervalo de leitura em milissegundos
+#define TAXA_AMOSTRAGEM_HZ 500 // Amostras por segundo (empuxo + pressão)
+#define PERIODO_US (1000000UL / TAXA_AMOSTRAGEM_HZ)
 #define TARE_AMOSTRAS 50  // Leituras usadas na média da tara
 #define NVS_CHAVE_FATOR "fatorADS1256" // Chave do fator de calibração no NVS
 
@@ -53,7 +54,7 @@ const float CELULA_CAPACIDADE = 500.0;    // Capacidade (kg)
 const float FATOR_TEORICO = (CELULA_SENSIBILIDADE * CELULA_EXCITACAO / CELULA_CAPACIDADE)
                           * (8388607.0 / (2.0 * ADS_VREF / 64.0));
 float maxValues[2] = {0.0, 0.0};  // Leituras de pico (peso, pressão)
-unsigned long previousMillis = 0; // Controle de tempo
+unsigned long proximaAmostraUs = 0; // Instante (micros) da próxima amostra
 float loadFactor = 0.0;           // Fator de calibração
 long tareOffset = 0;              // Leitura bruta da célula sem carga (tara)
 String filedir = "";              // Caminho do arquivo
@@ -537,12 +538,18 @@ void printToSerials(const String &message)
   SerialBT.println(message);
 }
 
+// Dispara uma amostra a cada PERIODO_US, mantendo a cadência fixa
 void staticTest()
 {
-  unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= INTERVALO)
-  {
-    previousMillis = currentMillis;
-    logData(currentMillis);
-  }
+  unsigned long agora = micros();
+  if ((long)(agora - proximaAmostraUs) < 0)
+    return;
+
+  proximaAmostraUs += PERIODO_US;
+  // Se atrasou mais de um período (ex.: durante uma TARE), não tenta
+  // compensar com uma rajada de leituras: retoma a cadência a partir de agora
+  if ((long)(agora - proximaAmostraUs) >= 0)
+    proximaAmostraUs = agora + PERIODO_US;
+
+  logData(millis());
 }
