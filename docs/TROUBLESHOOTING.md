@@ -55,7 +55,7 @@ Soluções:
 4. Verificar alimentação e GND do módulo SD
 ```
 
-### 3. ⚖️ Problemas com célula de carga / HX711
+### 3. ⚖️ Problemas com célula de carga / ADS1256
 
 Sintomas:
 
@@ -66,8 +66,8 @@ Sintomas:
 Soluções:
 
 ```
-1. Verificar DT(GPIO4) e SCK(GPIO18)
-2. Verificar ligação da célula no HX711
+1. Verificar SCLK(GPIO18), DOUT(GPIO4), DIN(GPIO13), CS(GPIO26) e DRDY(GPIO34)
+2. Verificar ligação da célula no ADS1256 (S+ em AIN0, S- em AIN1, E- no GND comum)
 3. Executar TARE pelo botão GPIO33 e por comando serial (TARE)
 4. Repetir calibração com peso conhecido
 ```
@@ -85,7 +85,7 @@ Soluções:
 ```
 1. Verificar alimentação do sensor
 2. Verificar divisor resistivo (2.2kΩ e 3.3kΩ)
-3. Medir tensão no GPIO35 (faixa esperada: 0-3.3V)
+3. Medir tensão na entrada AIN2 do ADS1256 (faixa esperada: 0-2.7V)
 4. Conferir GND comum entre sensor e ESP32
 ```
 

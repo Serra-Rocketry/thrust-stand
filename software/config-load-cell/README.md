@@ -6,15 +6,15 @@ Este sistema é composto pelos seguintes componentes principais:
 2. **`software/config-load-cell/fator_de_calibracao/fator_de_calibracao_main.py`**: ferramenta GUI para calcular/enviar o fator de calibração.
 3. **`software/config-load-cell/fator_de_calibracao/fator_de_calibracao_cli.py`**: utilitários/CLI de calibração (opcional).
 
-- **Firmware**: coleta dados da célula de carga (HX711) e envia via Serial/Bluetooth.
+- **Firmware**: coleta dados da célula de carga (pelo ADC ADS1256) e envia via Serial/Bluetooth.
 - **GUI**: lê as amostras RAW do ESP32, calcula o fator e envia via comando `SET LOAD FACTOR`.
 
 ## Passo a Passo para Configurar uma Célula do Zero
 
 1. **Montagem do Hardware**:
 
-   - Conecte a célula de carga ao amplificador HX711.
-   - Conecte o amplificador HX711 ao ESP32.
+   - Conecte a célula de carga ao módulo ADS1256 (`AIN0`/`AIN1`).
+   - Conecte o módulo ADS1256 ao ESP32 via SPI (ver [`docs/HARDWARE.md`](../../docs/HARDWARE.md)).
 
 2. **Configuração do ESP32**:
 

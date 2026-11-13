@@ -24,7 +24,7 @@ arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32 firmware/
 arduino-cli monitor -p /dev/ttyUSB0 -c baudrate=115200
 ```
 
-Required libraries: `HX711`, `Pushbutton`, `BluetoothSerial` (built-in), `Preferences` (built-in).
+Required libraries: `Pushbutton` (Pololu), `BluetoothSerial` (built-in), `Preferences` (built-in). The ADS1256 driver is local (`firmware/ADS1256.h`).
 
 ### Python Desktop Tools
 
@@ -143,7 +143,8 @@ No linting or formatting tools are configured. If introducing them:
 | Path | Description |
 |---|---|
 | `firmware/firmware.ino` | Main firmware entry point (406 lines) |
-| `firmware/Pressure.h` | PressureSensor class (header-only) |
+| `firmware/ADS1256.h` | ADS1256 24-bit ADC driver (header-only, SPI) |
+| `firmware/Pressure.h` | PressureSensor class: voltage -> pressure (header-only) |
 | `software/config-load-cell/fator_de_calibracao/fator_de_calibracao_main.py` | Qt GUI calibration app |
 | `software/config-load-cell/fator_de_calibracao/fator_de_calibracao_cli.py` | Serial communication + calibration logic |
 | `software/config-load-cell/fator_de_calibracao/ui_fator_de_calibracao.py` | Auto-generated Qt UI (DO NOT EDIT) |
@@ -162,6 +163,6 @@ No linting or formatting tools are configured. If introducing them:
 ## Common Pitfalls
 
 - The `ui_fator_de_calibracao.py` file is auto-generated from `fator_de_calibracao.ui` — edit the `.ui` file in Qt Designer instead.
-- ESP32 ADC readings can vary with attenuation/reference — adjust `Pressure.h` constructor parameters for your hardware.
+- Load cell and pressure are both read by the ADS1256, each channel with its own PGA and self-calibration (`ADS1256Channel`). Don't switch PGA without recalibrating that channel.
 - The firmware streams raw integers during calibration mode (`configMode`) — the Python tools expect this format.
 - LittleFS is the fallback when SD card initialization fails; code must handle both storage types.

@@ -35,13 +35,12 @@ O firmware implementa aquisição contínua de dados para testes estáticos, com
 ```
 firmware/
 ├── 📄 firmware.ino              # Arquivo principal
-└── 📄 Pressure.h                # Classe sensor de pressão
+├── 📄 ADS1256.h                 # Driver do ADC ADS1256 (célula de carga e pressão)
+└── 📄 Pressure.h                # Conversão tensão -> pressão
 ```
 
 ### Dependências e Bibliotecas
 
-- Wire
-- HX711
 - FS
 - SD
 - LittleFS
@@ -78,10 +77,8 @@ void setup() {
     preferences.begin("app", false);
     loadFactor = preferences.getFloat("loadFactor", -284.6);
 
-    pressureSensor.begin();
-
     setupStorageAndFile();
-    setupHX711();
+    setupADS1256();  // reset, autocalibração por canal e tara inicial
 }
 ```
 
@@ -113,8 +110,8 @@ Tempo,Empuxo,Pressao
 
 ### Processo de log
 
-- Leitura da célula de carga (`HX711`)
-- Leitura do sensor de pressão (`PressureSensor`)
+- Leitura da célula de carga pelo ADS1256 (`AIN0`/`AIN1`, ganho 64)
+- Leitura do sensor de pressão pelo ADS1256 (`AIN2`, ganho 1) e conversão com `PressureSensor`
 - Atualização de picos de leitura
 - Escrita no arquivo CSV atual no SD/LittleFS
 - Espelhamento da leitura em Serial/Bluetooth
