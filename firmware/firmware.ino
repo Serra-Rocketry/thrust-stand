@@ -8,6 +8,7 @@
 #include <Preferences.h>
 
 #include "ADS1256.h"
+#include "MAX31855.h"
 #include "Pressure.h"
 
 // Definições de pinos e constantes
@@ -23,6 +24,8 @@
 #define ADS_DIN_PIN 13    // ADS1256 DIN  <- MOSI
 #define ADS_CS_PIN 26     // ADS1256 CS
 #define ADS_DRDY_PIN 34   // ADS1256 DRDY (pino só de entrada)
+#define MAX_CS_PIN 21     // MAX31855 CS (divide SCLK=18 e SO=4 com o ADS1256)
+#define TERMOPAR_INTERVALO_MS 125 // MAX31855 leva até 100 ms por conversão
 #define TAXA_AMOSTRAGEM_HZ 500 // Amostras por segundo (empuxo + pressão)
 #define PERIODO_US (1000000UL / TAXA_AMOSTRAGEM_HZ)
 #define TRANSMISSAO_HZ 50      // Linhas por segundo enviadas por Serial/BT (o SD recebe todas)
@@ -69,7 +72,11 @@ struct Amostra
   uint32_t ms;
   float empuxo;
   float pressao;
+  float temperatura; // NAN se o termopar estiver ausente ou com falha
 };
+
+float temperaturaAtual = NAN;            // Última leitura do termopar (°C)
+unsigned long ultimaLeituraTermopar = 0; // millis() da última leitura
 
 QueueHandle_t filaAmostras = NULL;      // Fila aquisição (núcleo 1) -> gravação (núcleo 0)
 File dataFile;                          // Arquivo de dados, aberto durante todo o teste
@@ -85,6 +92,7 @@ static bool configMode = false;
 Pushbutton button(BTN_PIN);
 PressureSensor pressureSensor(R1, R2, VminPressure, VmaxPressure, maxPressure);
 ADS1256 adc(spiADC, ADS_CS_PIN, ADS_DRDY_PIN, ADS_VREF);
+MAX31855 termopar(spiADC, MAX_CS_PIN); // termopar tipo K
 BluetoothSerial SerialBT;
 
 // Célula de carga: entrada diferencial AIN0(+)/AIN1(-), ganho 64
@@ -107,6 +115,8 @@ bool readLoadCellRaw(long &raw);
 bool tareLoadCell(int amostras);
 float rawToKg(long raw);
 bool readPressureMPa(float &pressao);
+void setupTermopar();
+void updateTemperature();
 void handleTare();
 void logData(unsigned long ms);
 bool startRecording();
@@ -133,6 +143,7 @@ void setup()
   pinMode(BTN_PIN, INPUT);
 
   bool adcOk = setupADS1256();
+  if (adcOk) setupTermopar(); // opcional: sem termopar o teste continua
   // O arquivo só é criado com o ADS1256 funcionando: antes, cada boot com
   // falha (seguido de restart) deixava um arquivo vazio no cartão
   bool sdOk = adcOk && setupStorageAndFile() && startRecording();
@@ -364,7 +375,7 @@ bool setupStorageAndFile()
   Serial.print("Arquivo: ");
   Serial.println(filedir);
 
-  if (!writeFile(filedir, "Tempo,Empuxo,Pressao\n"))
+  if (!writeFile(filedir, "Tempo,Empuxo,Pressao,Temperatura\n"))
   {
     printToSerials("Falha ao criar arquivo");
     return false;
@@ -457,6 +468,37 @@ bool readPressureMPa(float &pressao)
   return true;
 }
 
+void setupTermopar()
+{
+  termopar.begin(); // o barramento já foi iniciado em setupADS1256()
+  delay(TERMOPAR_INTERVALO_MS); // espera a primeira conversão
+
+  float temperatura;
+  if (termopar.readCelsius(temperatura))
+  {
+    temperaturaAtual = temperatura;
+    printToSerials("Termopar OK: " + String(temperatura, 2) + " C");
+  }
+  else
+  {
+    printToSerials("AVISO: termopar com falha (codigo " + String(termopar.lastFault()) +
+                   "). Temperatura sera gravada como nan.");
+  }
+  ultimaLeituraTermopar = millis();
+}
+
+// Atualiza temperaturaAtual a cada TERMOPAR_INTERVALO_MS (ler mais rápido
+// que isso interromperia a conversão do MAX31855)
+void updateTemperature()
+{
+  if (millis() - ultimaLeituraTermopar < TERMOPAR_INTERVALO_MS)
+    return;
+  ultimaLeituraTermopar = millis();
+
+  float temperatura;
+  temperaturaAtual = termopar.readCelsius(temperatura) ? temperatura : NAN;
+}
+
 void handleTare()
 {
   if (tareLoadCell(TARE_AMOSTRAS))
@@ -486,10 +528,13 @@ void logData(unsigned long ms)
     return;
   }
 
+  updateTemperature();
+
   Amostra amostra;
   amostra.ms = ms;
   amostra.empuxo = rawToKg(raw); // o sinal é acertado pelo fator de calibração
   amostra.pressao = pressao;
+  amostra.temperatura = temperaturaAtual;
 
   // Não espera: se a fila estiver cheia (SD travado por muito tempo), conta a perda
   // (só este núcleo escreve em amostrasPerdidas; o outro apenas lê)
@@ -536,8 +581,8 @@ bool startRecording()
 void recordingTask(void *param)
 {
   Amostra amostra;
-  Amostra ultima = {0, 0.0, 0.0};
-  char linha[64];
+  Amostra ultima = {0, 0.0, 0.0, NAN};
+  char linha[96];
   unsigned int contadorTransmissao = 0;
   unsigned long ultimoFlush = millis();
   uint32_t perdidasAvisadas = 0;
@@ -547,8 +592,9 @@ void recordingTask(void *param)
   {
     if (xQueueReceive(filaAmostras, &amostra, pdMS_TO_TICKS(100)) == pdTRUE)
     {
-      int tamanho = snprintf(linha, sizeof(linha), "%lu,%.6f,%.6f\n",
-                             (unsigned long)amostra.ms, amostra.empuxo, amostra.pressao);
+      int tamanho = snprintf(linha, sizeof(linha), "%lu,%.6f,%.6f,%.2f\n",
+                             (unsigned long)amostra.ms, amostra.empuxo, amostra.pressao,
+                             amostra.temperatura);
 
       bool ok = dataFile.write((const uint8_t *)linha, tamanho) == (size_t)tamanho;
       if (ok != gravacaoOk)
@@ -587,8 +633,9 @@ void recordingTask(void *param)
 
       if (!btTransmitindo && !configMode)
       {
-        snprintf(linha, sizeof(linha), "Gravando t=%lus | %.2f kg (pico %.2f) | %.2f MPa",
-                 (unsigned long)(ultima.ms / 1000), ultima.empuxo, maxValues[0], ultima.pressao);
+        snprintf(linha, sizeof(linha), "Gravando t=%lus | %.2f kg (pico %.2f) | %.2f MPa | %.1f C",
+                 (unsigned long)(ultima.ms / 1000), ultima.empuxo, maxValues[0], ultima.pressao,
+                 ultima.temperatura);
         SerialBT.println(linha);
       }
     }
