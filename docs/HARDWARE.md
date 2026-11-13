@@ -85,11 +85,11 @@ Vout = Vsensor * (R2 / (R1 + R2))
 Vout_max = 4.5V * (3300 / (2200 + 3300)) = 2.7V
 ```
 
-## 📷 Foto de Referência
+## 📐 Esquemático
 
-Montagem completa:
+O esquemático atual está no projeto do KiCad: [`teste_estatico.kicad_sch`](../hardware/teste_estatico/kicad/projeto%20kicad/teste_estatico.kicad_sch). Para visualizar, abra no KiCad (versão 10 ou superior).
 
-<img src="./Esquematico.png" width="500" alt="Esquemático">
+O esquemático antigo, feito no Fritzing (com o HX711 nos pinos 26/27), foi movido para [`Legacy/`](../Legacy/).
 
 ## ⚠️ Considerações de Projeto
 
