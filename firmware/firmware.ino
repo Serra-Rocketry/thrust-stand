@@ -1,5 +1,4 @@
 // INCLUSÃO DE BIBLIOTECAS
-#include <HX711.h>
 #include <FS.h>
 #include <SD.h>
 #include <LittleFS.h>
@@ -8,6 +7,7 @@
 #include <BluetoothSerial.h>
 #include <Preferences.h>
 
+#include "ADS1256.h"
 #include "Pressure.h"
 
 // Definições de pinos e constantes
@@ -18,13 +18,20 @@
 #define SD_MOSI_PIN 27    // Pino MOSI do SD
 #define BUZZER_PIN 32     // Pino do buzzer
 #define BTN_PIN 33        // Pino do botão
-#define CELULA_DT_PIN 4   // Pino de dados da célula de carga (DAT)
-#define CELULA_SCK_PIN 18 // Pino de clock da célula de carga (CLK)
+#define ADS_SCLK_PIN 18   // ADS1256 SCLK (reaproveita a trilha do antigo SCK do HX711)
+#define ADS_DOUT_PIN 4    // ADS1256 DOUT -> MISO (reaproveita a trilha do antigo DT do HX711)
+#define ADS_DIN_PIN 13    // ADS1256 DIN  <- MOSI
+#define ADS_CS_PIN 26     // ADS1256 CS
+#define ADS_DRDY_PIN 34   // ADS1256 DRDY (pino só de entrada)
 #define PRESSURE_PIN 35   // Pino do sensor de pressão
 #define INTERVALO 1       // Intervalo de leitura em milissegundos
+#define TARE_AMOSTRAS 50  // Leituras usadas na média da tara
 
 // Instância SPI customizada para o SD (SCK=25, MISO=23, MOSI=27, CS=5)
 SPIClass spiSD(VSPI);
+
+// Barramento SPI separado para o ADS1256 (SCLK=18, MISO=4, MOSI=13)
+SPIClass spiADC(HSPI);
 
 // Variáveis globais
 const float VinPressure = 5.0;    // Tensão que alimenta o sensor
@@ -35,9 +42,11 @@ const float R1 = 2200.0;          // Resistor entre sensor e pino ESP32
 const float R2 = 3300.0;          // Resistor entre pino ESP32 e GND
 const int RESOLUCAO_ADC = 4095;   // ESP32 tem ADC de 12 bits (2^12 - 1)
 const float TENSAO_MAX_ADC = 3.3; // Tensão de referência do ADC do ESP32
+const float ADS_VREF = 2.5;       // Referência de tensão do módulo ADS1256
 float maxValues[2] = {0.0, 0.0};  // Leituras de pico (peso, pressão)
 unsigned long previousMillis = 0; // Controle de tempo
 float loadFactor = 0.0;           // Fator de calibração
+long tareOffset = 0;              // Leitura bruta da célula sem carga (tara)
 String filedir = "";              // Caminho do arquivo
 String leitura = "";              // Leitura dos dados
 
@@ -49,8 +58,12 @@ static bool configMode = false;
 // Instanciação de objetos
 Pushbutton button(BTN_PIN);
 PressureSensor pressureSensor(PRESSURE_PIN, R1, R2, RESOLUCAO_ADC, TENSAO_MAX_ADC, VminPressure, VmaxPressure, maxPressure);
-HX711 escala;
+ADS1256 adc(spiADC, ADS_CS_PIN, ADS_DRDY_PIN, ADS_VREF);
 BluetoothSerial SerialBT;
+
+// Célula de carga: entrada diferencial AIN0(+)/AIN1(-), ganho 64
+// (sinal de ~10 mV a plena carga: 2 mV/V com excitação de 5 V)
+ADS1256Channel canalCelula = {ADS1256_AIN0, ADS1256_AIN1, ADS1256_PGA_64};
 Preferences preferences;
 
 // Declarações antecipadas
@@ -59,7 +72,11 @@ void setLoadFactor(float factor);
 void buzzSignal(String signal);
 bool setupStorage();
 bool setupStorageAndFile();
-bool setupHX711();
+bool setupADS1256();
+bool readLoadCellRaw(long &raw);
+bool tareLoadCell(int amostras);
+float rawToKg(long raw);
+void handleTare();
 void logData(unsigned long ms);
 bool writeFile(const String &path, const String &message);
 void appendFile(const String &path, const String &message);
@@ -85,17 +102,17 @@ void setup()
   pressureSensor.begin();
 
   bool sdOk = setupStorageAndFile();
-  bool hx711Ok = setupHX711();
+  bool adcOk = setupADS1256();
 
-  if (sdOk && hx711Ok)
+  if (sdOk && adcOk)
   {
     printToSerials("Sistema configurado. Transmitindo...");
     buzzSignal("Sucesso");
   }
   else
   {
-    if (!sdOk)   printToSerials("ERRO: Falha no storage.");
-    if (!hx711Ok) printToSerials("ERRO: Falha no HX711.");
+    if (!sdOk)  printToSerials("ERRO: Falha no storage.");
+    if (!adcOk) printToSerials("ERRO: Falha no ADS1256.");
     printToSerials("Falha critica. Reiniciando...");
     buzzSignal("Alerta");
     delay(3000);
@@ -112,16 +129,7 @@ void loop()
 
   if (button.getSingleDebouncedPress())
   {
-    if (escala.wait_ready_timeout(1000))
-    {
-      buzzSignal("Beep");
-      printToSerials("Celula Zerada!");
-      escala.tare();
-    }
-    else
-    {
-      printToSerials("HX711 nao pronto, TARE ignorado.");
-    }
+    handleTare();
   }
 
   if (Serial.available())
@@ -141,11 +149,12 @@ void loop()
   // Stream RAW de calibração
   if (configMode)
   {
-    if (escala.wait_ready_timeout(1000))
+    long raw;
+    if (readLoadCellRaw(raw))
     {
-      long raw = escala.get_value(1);
-      Serial.println(raw);
-      SerialBT.println(raw);
+      long valor = raw - tareOffset; // leitura bruta já descontada a tara
+      Serial.println(valor);
+      SerialBT.println(valor);
     }
     delay(200);
   }
@@ -155,16 +164,7 @@ void processCommand(String command)
 {
   if (command.equalsIgnoreCase("TARE"))
   {
-    if (escala.wait_ready_timeout(1000))
-    {
-      buzzSignal("Beep");
-      printToSerials("Celula Zerada!");
-      escala.tare();
-    }
-    else
-    {
-      printToSerials("HX711 nao pronto, TARE ignorado.");
-    }
+    handleTare();
     return;
   }
 
@@ -176,15 +176,14 @@ void processCommand(String command)
 
   if (command.startsWith("INIT CONFIG"))
   {
-    if (escala.wait_ready_timeout(1000))
+    if (tareLoadCell(TARE_AMOSTRAS))
     {
-      escala.tare();
       configMode = true;
       printToSerials("Modo calibracao ativo. Aguardando SET LOAD FACTOR...");
     }
     else
     {
-      printToSerials("HX711 nao pronto. Verifique conexoes.");
+      printToSerials("ADS1256 nao respondeu. Verifique conexoes.");
     }
     return;
   }
@@ -215,7 +214,6 @@ void processCommand(String command)
 void setLoadFactor(float factor)
 {
   loadFactor = factor;
-  escala.set_scale(loadFactor);
   preferences.putFloat("loadFactor", loadFactor);
   printToSerials("Fator de carga atualizado: " + String(loadFactor, 4));
   buzzSignal("Sucesso");
@@ -329,51 +327,102 @@ bool setupStorageAndFile()
   return true;
 }
 
-bool setupHX711()
+bool setupADS1256()
 {
-  Serial.println("Iniciando HX711...");
-  escala.begin(CELULA_DT_PIN, CELULA_SCK_PIN);
+  Serial.println("Iniciando ADS1256...");
+  spiADC.begin(ADS_SCLK_PIN, ADS_DOUT_PIN, ADS_DIN_PIN, -1); // CS controlado pelo driver
+  delay(100); // aguarda o oscilador do módulo estabilizar
 
-  unsigned long timeout = millis();
-  while (!escala.is_ready())
+  if (!adc.begin(ADS1256_DRATE_2000, true))
   {
-    if (millis() - timeout > 5000)
-    {
-      Serial.println("ERRO: HX711 nao respondeu (timeout 5s). Verifique DT=4, SCK=18.");
-      return false;
-    }
-    delay(10);
+    Serial.println("ERRO: ADS1256 nao respondeu. Verifique SCLK=18, DOUT=4, DIN=13, CS=26, DRDY=34.");
+    return false;
+  }
+  Serial.println("ADS1256 detectado OK.");
+
+  if (!adc.calibrate(canalCelula))
+  {
+    Serial.println("ERRO: Falha na autocalibracao do ADS1256.");
+    return false;
   }
 
-  Serial.println("HX711 detectado OK.");
-  escala.set_scale(loadFactor);
-  Serial.print("set_scale com fator: ");
+  Serial.print("Fator de carga: ");
   Serial.println(loadFactor, 4);
 
   // Warmup: descarta as primeiras leituras para estabilizar
   Serial.println("Aguardando estabilizacao...");
+  long raw;
   for (int i = 0; i < 10; i++)
   {
-    escala.get_value(1);
+    readLoadCellRaw(raw);
     delay(100);
   }
 
-  escala.tare(10); // média de 10 amostras para tara precisa
+  if (!tareLoadCell(TARE_AMOSTRAS))
+  {
+    Serial.println("ERRO: Falha na tara inicial.");
+    return false;
+  }
   Serial.println("tare OK");
 
-  printToSerials("HX711 conectado");
+  printToSerials("ADS1256 conectado");
   return true;
+}
+
+// Lê a célula de carga (valor bruto de 24 bits, sem tara)
+bool readLoadCellRaw(long &raw)
+{
+  int32_t valor;
+  if (!adc.read(canalCelula, valor, 1000))
+    return false;
+  raw = valor;
+  return true;
+}
+
+// Zera a célula: guarda a média de várias leituras sem carga
+bool tareLoadCell(int amostras)
+{
+  int64_t soma = 0;
+  long raw;
+  for (int i = 0; i < amostras; i++)
+  {
+    if (!readLoadCellRaw(raw))
+      return false;
+    soma += raw;
+  }
+  tareOffset = soma / amostras;
+  return true;
+}
+
+// Converte a leitura bruta em kg usando a tara e o fator de calibração
+float rawToKg(long raw)
+{
+  return (raw - tareOffset) / loadFactor;
+}
+
+void handleTare()
+{
+  if (tareLoadCell(TARE_AMOSTRAS))
+  {
+    buzzSignal("Beep");
+    printToSerials("Celula Zerada!");
+  }
+  else
+  {
+    printToSerials("ADS1256 nao respondeu, TARE ignorado.");
+  }
 }
 
 void logData(unsigned long ms)
 {
-  if (!escala.wait_ready_timeout(1000))
+  long raw;
+  if (!readLoadCellRaw(raw))
   {
-    Serial.println("AVISO: HX711 timeout em logData, pulando leitura.");
+    Serial.println("AVISO: ADS1256 timeout em logData, pulando leitura.");
     return;
   }
 
-  float peso = abs(escala.get_units(1)); // 1 amostra por leitura
+  float peso = abs(rawToKg(raw));
   float pressao = pressureSensor.readMPa();
 
   if (peso > maxValues[0]) maxValues[0] = peso;
