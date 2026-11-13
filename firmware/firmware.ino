@@ -25,6 +25,8 @@
 #define ADS_DRDY_PIN 34   // ADS1256 DRDY (pino só de entrada)
 #define TAXA_AMOSTRAGEM_HZ 500 // Amostras por segundo (empuxo + pressão)
 #define PERIODO_US (1000000UL / TAXA_AMOSTRAGEM_HZ)
+#define TRANSMISSAO_HZ 50      // Linhas por segundo enviadas por Serial/BT (o SD recebe todas)
+#define DECIMACAO (TAXA_AMOSTRAGEM_HZ / TRANSMISSAO_HZ)
 #define TARE_AMOSTRAS 50  // Leituras usadas na média da tara
 #define NVS_CHAVE_FATOR "fatorADS1256" // Chave do fator de calibração no NVS
 
@@ -460,7 +462,14 @@ void logData(unsigned long ms)
 
   leitura = String(ms) + "," + String(peso, 6) + "," + String(pressao, 6);
 
-  printToSerials(leitura);
+  // A Serial a 115200 baud não comporta 500 linhas/s: transmite 1 a cada DECIMACAO
+  static unsigned int contadorTransmissao = 0;
+  if (++contadorTransmissao >= DECIMACAO)
+  {
+    contadorTransmissao = 0;
+    printToSerials(leitura);
+  }
+
   appendFile(filedir, leitura);
 }
 
