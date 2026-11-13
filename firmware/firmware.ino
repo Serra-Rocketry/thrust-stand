@@ -439,7 +439,7 @@ void logData(unsigned long ms)
     return;
   }
 
-  float peso = abs(rawToKg(raw));
+  float peso = rawToKg(raw); // o sinal é acertado pelo fator de calibração
 
   if (peso > maxValues[0]) maxValues[0] = peso;
   if (pressao > maxValues[1]) maxValues[1] = pressao;
