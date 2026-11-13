@@ -27,6 +27,8 @@
 #define PERIODO_US (1000000UL / TAXA_AMOSTRAGEM_HZ)
 #define TRANSMISSAO_HZ 50      // Linhas por segundo enviadas por Serial/BT (o SD recebe todas)
 #define DECIMACAO (TAXA_AMOSTRAGEM_HZ / TRANSMISSAO_HZ)
+#define FILA_TAMANHO 1024      // Amostras na fila até o SD (~2 s a 500 Hz)
+#define FLUSH_INTERVALO_MS 1000 // Força a escrita no cartão a cada 1 s
 #define TARE_AMOSTRAS 50  // Leituras usadas na média da tara
 #define NVS_CHAVE_FATOR "fatorADS1256" // Chave do fator de calibração no NVS
 
@@ -60,7 +62,18 @@ unsigned long proximaAmostraUs = 0; // Instante (micros) da próxima amostra
 float loadFactor = 0.0;           // Fator de calibração
 long tareOffset = 0;              // Leitura bruta da célula sem carga (tara)
 String filedir = "";              // Caminho do arquivo
-String leitura = "";              // Leitura dos dados
+
+// Uma linha do arquivo de dados, passada do núcleo de aquisição para o de gravação
+struct Amostra
+{
+  uint32_t ms;
+  float empuxo;
+  float pressao;
+};
+
+QueueHandle_t filaAmostras = NULL;      // Fila aquisição (núcleo 1) -> gravação (núcleo 0)
+File dataFile;                          // Arquivo de dados, aberto durante todo o teste
+volatile uint32_t amostrasPerdidas = 0; // Amostras descartadas por fila cheia
 
 enum StorageType { STORAGE_NONE, STORAGE_SD, STORAGE_LITTLEFS };
 StorageType storageType = STORAGE_NONE;
@@ -95,8 +108,9 @@ float rawToKg(long raw);
 bool readPressureMPa(float &pressao);
 void handleTare();
 void logData(unsigned long ms);
+bool startRecording();
+void recordingTask(void *param);
 bool writeFile(const String &path, const String &message);
-void appendFile(const String &path, const String &message);
 void printToSerials(const String &message);
 void staticTest();
 String generateFileName();
@@ -117,7 +131,7 @@ void setup()
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(BTN_PIN, INPUT);
 
-  bool sdOk = setupStorageAndFile();
+  bool sdOk = setupStorageAndFile() && startRecording();
   bool adcOk = setupADS1256();
 
   if (sdOk && adcOk)
@@ -455,22 +469,102 @@ void logData(unsigned long ms)
     return;
   }
 
-  float peso = rawToKg(raw); // o sinal é acertado pelo fator de calibração
+  Amostra amostra;
+  amostra.ms = ms;
+  amostra.empuxo = rawToKg(raw); // o sinal é acertado pelo fator de calibração
+  amostra.pressao = pressao;
 
-  if (peso > maxValues[0]) maxValues[0] = peso;
-  if (pressao > maxValues[1]) maxValues[1] = pressao;
+  // Não espera: se a fila estiver cheia (SD travado por muito tempo), conta a perda
+  // (só este núcleo escreve em amostrasPerdidas; o outro apenas lê)
+  if (xQueueSend(filaAmostras, &amostra, 0) != pdTRUE)
+    amostrasPerdidas = amostrasPerdidas + 1;
+}
 
-  leitura = String(ms) + "," + String(peso, 6) + "," + String(pressao, 6);
-
-  // A Serial a 115200 baud não comporta 500 linhas/s: transmite 1 a cada DECIMACAO
-  static unsigned int contadorTransmissao = 0;
-  if (++contadorTransmissao >= DECIMACAO)
-  {
-    contadorTransmissao = 0;
-    printToSerials(leitura);
+// Abre o arquivo de dados (que fica aberto) e cria a tarefa de gravação
+bool startRecording()
+{
+  if (storageType == STORAGE_SD) {
+    dataFile = SD.open(filedir, FILE_APPEND);
+  } else if (storageType == STORAGE_LITTLEFS) {
+    dataFile = LittleFS.open(filedir, FILE_APPEND);
   }
 
-  appendFile(filedir, leitura);
+  if (!dataFile)
+  {
+    printToSerials("Falha ao abrir arquivo para gravacao: " + filedir);
+    return false;
+  }
+
+  filaAmostras = xQueueCreate(FILA_TAMANHO, sizeof(Amostra));
+  if (filaAmostras == NULL)
+  {
+    printToSerials("Falha ao criar a fila de amostras");
+    return false;
+  }
+
+  // Núcleo 0: o loop() (aquisição) roda no núcleo 1
+  if (xTaskCreatePinnedToCore(recordingTask, "gravacao", 8192, NULL, 1, NULL, 0) != pdPASS)
+  {
+    printToSerials("Falha ao criar a tarefa de gravacao");
+    return false;
+  }
+
+  return true;
+}
+
+// Tarefa do núcleo 0: grava cada amostra da fila no arquivo (que fica
+// aberto) e transmite 1 a cada DECIMACAO por Serial/BT. Assim, uma demora
+// do cartão SD não atrasa a leitura dos sensores, que roda no núcleo 1.
+void recordingTask(void *param)
+{
+  Amostra amostra;
+  char linha[64];
+  unsigned int contadorTransmissao = 0;
+  unsigned long ultimoFlush = millis();
+  uint32_t perdidasAvisadas = 0;
+  bool gravacaoOk = true;
+
+  for (;;)
+  {
+    if (xQueueReceive(filaAmostras, &amostra, pdMS_TO_TICKS(100)) == pdTRUE)
+    {
+      int tamanho = snprintf(linha, sizeof(linha), "%lu,%.6f,%.6f\n",
+                             (unsigned long)amostra.ms, amostra.empuxo, amostra.pressao);
+
+      bool ok = dataFile.write((const uint8_t *)linha, tamanho) == (size_t)tamanho;
+      if (ok != gravacaoOk)
+      {
+        gravacaoOk = ok;
+        digitalWrite(LED_PIN, ok ? HIGH : LOW);
+        if (!ok) printToSerials("Falha ao gravar linha no arquivo");
+      }
+
+      if (amostra.empuxo > maxValues[0]) maxValues[0] = amostra.empuxo;
+      if (amostra.pressao > maxValues[1]) maxValues[1] = amostra.pressao;
+
+      // A Serial a 115200 baud não comporta 500 linhas/s
+      if (++contadorTransmissao >= DECIMACAO)
+      {
+        contadorTransmissao = 0;
+        linha[tamanho - 1] = '\0'; // tira o '\n' (println já coloca)
+        printToSerials(String(linha));
+      }
+    }
+
+    // O buffer do arquivo só vai para o cartão no flush: perde no máximo
+    // FLUSH_INTERVALO_MS de dados se a energia cair
+    if (millis() - ultimoFlush >= FLUSH_INTERVALO_MS)
+    {
+      dataFile.flush();
+      ultimoFlush = millis();
+
+      if (amostrasPerdidas != perdidasAvisadas)
+      {
+        perdidasAvisadas = amostrasPerdidas;
+        printToSerials("AVISO: amostras perdidas (fila cheia): " + String(perdidasAvisadas));
+      }
+    }
+  }
 }
 
 bool writeFile(const String &path, const String &message)
@@ -506,39 +600,6 @@ bool writeFile(const String &path, const String &message)
   }
 
   return ok;
-}
-
-void appendFile(const String &path, const String &message)
-{
-  File file;
-
-  if (storageType == STORAGE_SD) {
-    file = SD.open(path, FILE_APPEND);
-  } else if (storageType == STORAGE_LITTLEFS) {
-    file = LittleFS.open(path, FILE_APPEND);
-  } else {
-    Serial.println("ERRO: storage nao inicializado em appendFile");
-    return;
-  }
-
-  if (!file)
-  {
-    printToSerials("Falha ao abrir arquivo para append: " + path);
-    return;
-  }
-
-  bool ok = file.print(message + "\n");
-  file.close();
-
-  if (ok)
-  {
-    digitalWrite(LED_PIN, HIGH);
-  }
-  else 
-  {
-    printToSerials("Falha ao gravar linha no arquivo");
-    digitalWrite(LED_PIN, LOW);
-  }
 }
 
 void printToSerials(const String &message)
