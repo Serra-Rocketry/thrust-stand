@@ -142,8 +142,10 @@ No linting or formatting tools are configured. If introducing them:
 
 | Path | Description |
 |---|---|
-| `firmware/firmware.ino` | Main firmware entry point (406 lines) |
+| `firmware/firmware.ino` | Main firmware entry point |
 | `firmware/ADS1256.h` | ADS1256 24-bit ADC driver (header-only, SPI) |
+| `firmware/MAX31855.h` | MAX31855 type-K thermocouple driver (header-only, SPI) |
+| `software/fatordecalibracao/` | Manual calibration sketch (keys adjust the factor; has its own copy of `ADS1256.h`) |
 | `firmware/Pressure.h` | PressureSensor class: voltage -> pressure (header-only) |
 | `software/config-load-cell/fator_de_calibracao/fator_de_calibracao_main.py` | Qt GUI calibration app |
 | `software/config-load-cell/fator_de_calibracao/fator_de_calibracao_cli.py` | Serial communication + calibration logic |
@@ -164,5 +166,9 @@ No linting or formatting tools are configured. If introducing them:
 
 - The `ui_fator_de_calibracao.py` file is auto-generated from `fator_de_calibracao.ui` — edit the `.ui` file in Qt Designer instead.
 - Load cell and pressure are both read by the ADS1256, each channel with its own PGA and self-calibration (`ADS1256Channel`). Don't switch PGA without recalibrating that channel.
+- `software/fatordecalibracao/ADS1256.h` is a copy of `firmware/ADS1256.h` (the Arduino IDE only compiles files inside the sketch folder). Keep both identical.
+- Acquisition runs in `loop()` (core 1) and SD writing in `recordingTask` (core 0), connected by a FreeRTOS queue. Don't touch the SD from `loop()` after `startRecording()`.
+- The calibration factor lives in NVS key `fatorADS1256` (namespace `app`). The old `loadFactor` key was the HX711 factor and is ignored.
+- Don't read the MAX31855 faster than every ~100 ms: pulling CS low aborts the conversion in progress.
 - The firmware streams raw integers during calibration mode (`configMode`) — the Python tools expect this format.
 - LittleFS is the fallback when SD card initialization fails; code must handle both storage types.

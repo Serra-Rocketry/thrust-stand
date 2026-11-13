@@ -104,7 +104,48 @@ Soluções:
 4. Testar acionamento com monitor serial aberto
 ```
 
-### 6. 📡 Problemas de comunicação Serial/Bluetooth
+### 6. 🌡️ Problemas com o termopar (MAX31855)
+
+Sintomas:
+
+- Coluna `Temperatura` com `nan`
+- Aviso no boot: `termopar com falha (codigo N)`
+
+Códigos de falha:
+
+| Código | Significado |
+| ------ | ----------- |
+| 1 | Termopar desconectado (circuito aberto) |
+| 2 | Termopar em curto com GND |
+| 4 | Termopar em curto com VCC |
+| 128 | O MAX31855 não respondeu (verificar CS no GPIO21, SCK, SO e alimentação 3,3 V) |
+
+Soluções:
+
+```
+1. Conferir o encaixe do termopar nos bornes T+ / T-
+2. Conferir a polaridade (temperatura caindo ao aquecer = fios invertidos)
+3. Conferir CS(GPIO21), SCK(GPIO18) e SO(GPIO4)
+4. Termopar não deve encostar em metal ligado ao GND do circuito
+```
+
+### 7. 📉 Amostras perdidas
+
+Sintoma:
+
+- Aviso `AVISO: amostras perdidas (fila cheia): N`
+
+Causa: o cartão SD ficou travado por mais de ~2 s e a fila de amostras encheu.
+
+Soluções:
+
+```
+1. Usar um cartão SD de boa qualidade (classe 10 ou superior), formatado em FAT32
+2. Evitar cartões quase cheios
+3. Enviar BT OFF antes do teste para aliviar o processador
+```
+
+### 8. 📡 Problemas de comunicação Serial/Bluetooth
 
 Sintomas:
 

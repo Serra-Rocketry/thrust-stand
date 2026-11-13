@@ -31,7 +31,7 @@ git clone https://github.com/ViniciusCMB/thrust-stand.git
 
 ## 🔧 Pré-requisitos
 
-- Hardware: ESP32 DevKit V1, célula de carga + módulo ADS1256, sensor de pressão (com divisor resistivo), módulo microSD (SPI), botão tátil (`GPIO33` para TARE), LED com resistor de limitação, buzzer
+- Hardware: ESP32 DevKit V1, célula de carga + módulo ADS1256, sensor de pressão (com divisor resistivo), termopar tipo K + módulo MAX31855, módulo microSD (SPI), botão tátil (`GPIO33` para TARE), LED com resistor de limitação, buzzer
 - Software: Arduino IDE 2.0+
 - Bibliotecas: ver `docs/FIRMWARE.md`
 
@@ -44,11 +44,12 @@ git clone https://github.com/ViniciusCMB/thrust-stand.git
 
 ## 🎯 Funcionalidades
 
-- ✅ Aquisição de dados de empuxo e pressão em tempo real
-- ✅ Armazenamento em cartão SD com arquivos sequenciais
-- ✅ Controle local por botões (TARE e novo arquivo)
+- ✅ Aquisição de empuxo e pressão a 500 Hz com ADC de 24 bits (ADS1256)
+- ✅ Temperatura com termopar tipo K (MAX31855)
+- ✅ Armazenamento em cartão SD com arquivos sequenciais, sem perda de amostras (gravação em núcleo separado)
+- ✅ Controle local por botão (TARE)
 - ✅ LED de status de gravação no SD
-- ✅ Comunicação (Serial, Bluetooth)
+- ✅ Comunicação (Serial, Bluetooth), com `BT OFF` para pausar a transmissão durante o teste
 - ✅ Calibração persistente da célula de carga
 
 ## 📊 Dados de Teste

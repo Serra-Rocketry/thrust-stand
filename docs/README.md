@@ -72,7 +72,8 @@ graph TD;
 ### Especificações do Sistema
 
 - Microcontrolador: ESP32
-- Sensores: célula de carga e sensor de pressão analógico, ambos lidos pelo ADC ADS1256 (24 bits)
+- Sensores: célula de carga e sensor de pressão analógico, ambos lidos pelo ADC ADS1256 (24 bits), e termopar tipo K (MAX31855)
+- Amostragem: 500 Hz (empuxo e pressão), 8 Hz (temperatura)
 - Armazenamento: cartão SD (SPI), com fallback para LittleFS
 - Comunicação: Serial USB e Bluetooth
 - Controles físicos:
