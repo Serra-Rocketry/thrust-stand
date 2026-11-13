@@ -31,4 +31,4 @@ Este sistema é composto pelos seguintes componentes principais:
 4. **Verificação Final**:
     - Reinicie o ESP32 e valide a leitura em `kgf` via Serial (o firmware faz log contínuo).
 
-Obs.: os arquivos `Config.ino`, `Verify.ino`, `DadosSerial.py`, `Calibrar.py` são legados e não fazem parte do fluxo atual.
+Obs.: os arquivos legados (`Config.ino`, `Verify.ino`, `DadosSerial.py`, `Calibrar.py` e os dados brutos do HX711) foram movidos para [`Legacy/software/config-load-cell/`](../../Legacy/software/config-load-cell/) e não fazem parte do fluxo atual.

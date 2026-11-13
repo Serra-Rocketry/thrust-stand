@@ -157,7 +157,7 @@ No linting or formatting tools are configured. If introducing them:
 
 - **Static test data:** motor-specific test data (thrust curves, pressure logs) belongs in [Serra-Rocketry/motor](https://github.com/Serra-Rocketry/motor), not in this repo.
 - **This repo:** contains only the acquisition system (firmware, hardware, calibration tools).
-- **Calibration data:** `software/config-load-cell/Dados-Teste-Estatico/` is for calibration reference data only, not full test logs.
+- **Calibration data:** calibration reference data only, never full test logs. The old HX711 raw data lives in `Legacy/software/config-load-cell/Dados-Teste-Estatico/`.
 
 ## Common Pitfalls
 
