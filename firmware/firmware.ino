@@ -23,8 +23,7 @@
 #define ADS_DIN_PIN 13    // ADS1256 DIN  <- MOSI
 #define ADS_CS_PIN 26     // ADS1256 CS
 #define ADS_DRDY_PIN 34   // ADS1256 DRDY (pino só de entrada)
-#define PRESSURE_PIN 35   // Pino do sensor de pressão
-#define INTERVALO 1       // Intervalo de leitura em milissegundos
+#define INTERVALO 1      // Intervalo de leitura em milissegundos
 #define TARE_AMOSTRAS 50  // Leituras usadas na média da tara
 
 // Instância SPI customizada para o SD (SCK=25, MISO=23, MOSI=27, CS=5)
@@ -38,10 +37,8 @@ const float VinPressure = 5.0;    // Tensão que alimenta o sensor
 const float VminPressure = 0.27;  // Tensão de saída em 0 MPa
 const float VmaxPressure = 4.5;   // Tensão de saída em 10 MPa
 const float maxPressure = 10.0;   // Pressão máxima do sensor em MPa
-const float R1 = 2200.0;          // Resistor entre sensor e pino ESP32
-const float R2 = 3300.0;          // Resistor entre pino ESP32 e GND
-const int RESOLUCAO_ADC = 4095;   // ESP32 tem ADC de 12 bits (2^12 - 1)
-const float TENSAO_MAX_ADC = 3.3; // Tensão de referência do ADC do ESP32
+const float R1 = 2200.0;          // Resistor entre sensor e entrada AIN2 do ADS1256
+const float R2 = 3300.0;          // Resistor entre AIN2 e GND
 const float ADS_VREF = 2.5;       // Referência de tensão do módulo ADS1256
 float maxValues[2] = {0.0, 0.0};  // Leituras de pico (peso, pressão)
 unsigned long previousMillis = 0; // Controle de tempo
@@ -57,13 +54,17 @@ static bool configMode = false;
 
 // Instanciação de objetos
 Pushbutton button(BTN_PIN);
-PressureSensor pressureSensor(PRESSURE_PIN, R1, R2, RESOLUCAO_ADC, TENSAO_MAX_ADC, VminPressure, VmaxPressure, maxPressure);
+PressureSensor pressureSensor(R1, R2, VminPressure, VmaxPressure, maxPressure);
 ADS1256 adc(spiADC, ADS_CS_PIN, ADS_DRDY_PIN, ADS_VREF);
 BluetoothSerial SerialBT;
 
 // Célula de carga: entrada diferencial AIN0(+)/AIN1(-), ganho 64
 // (sinal de ~10 mV a plena carga: 2 mV/V com excitação de 5 V)
 ADS1256Channel canalCelula = {ADS1256_AIN0, ADS1256_AIN1, ADS1256_PGA_64};
+
+// Sensor de pressão: AIN2 contra AINCOM (GND), ganho 1
+// (até 2,7 V depois do divisor; com o buffer ligado, o limite é 3 V)
+ADS1256Channel canalPressao = {ADS1256_AIN2, ADS1256_AINCOM, ADS1256_PGA_1};
 Preferences preferences;
 
 // Declarações antecipadas
@@ -76,6 +77,7 @@ bool setupADS1256();
 bool readLoadCellRaw(long &raw);
 bool tareLoadCell(int amostras);
 float rawToKg(long raw);
+bool readPressureMPa(float &pressao);
 void handleTare();
 void logData(unsigned long ms);
 bool writeFile(const String &path, const String &message);
@@ -98,8 +100,6 @@ void setup()
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(BTN_PIN, INPUT);
-
-  pressureSensor.begin();
 
   bool sdOk = setupStorageAndFile();
   bool adcOk = setupADS1256();
@@ -340,7 +340,7 @@ bool setupADS1256()
   }
   Serial.println("ADS1256 detectado OK.");
 
-  if (!adc.calibrate(canalCelula))
+  if (!adc.calibrate(canalCelula) || !adc.calibrate(canalPressao))
   {
     Serial.println("ERRO: Falha na autocalibracao do ADS1256.");
     return false;
@@ -400,6 +400,16 @@ float rawToKg(long raw)
   return (raw - tareOffset) / loadFactor;
 }
 
+// Lê o sensor de pressão pelo ADS1256 e converte para MPa
+bool readPressureMPa(float &pressao)
+{
+  int32_t valor;
+  if (!adc.read(canalPressao, valor, 1000))
+    return false;
+  pressao = pressureSensor.toMPa(adc.toVolts(valor, canalPressao.pga));
+  return true;
+}
+
 void handleTare()
 {
   if (tareLoadCell(TARE_AMOSTRAS))
@@ -422,8 +432,14 @@ void logData(unsigned long ms)
     return;
   }
 
+  float pressao;
+  if (!readPressureMPa(pressao))
+  {
+    Serial.println("AVISO: ADS1256 timeout na pressao, pulando leitura.");
+    return;
+  }
+
   float peso = abs(rawToKg(raw));
-  float pressao = pressureSensor.readMPa();
 
   if (peso > maxValues[0]) maxValues[0] = peso;
   if (pressao > maxValues[1]) maxValues[1] = pressao;
