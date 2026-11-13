@@ -52,7 +52,8 @@ class Receiver():
             raise
 
     def read_response(self):
-        return self.serial.readline().decode('utf-8').strip()
+        # errors='replace': bytes corrompidos no boot do ESP não derrubam a leitura
+        return self.serial.readline().decode('utf-8', errors='replace').strip()
 
     def check_connection(self):
         return self.serial.is_open
@@ -62,6 +63,29 @@ class Receiver():
 
     def close(self):
         self.serial.close()
+
+def enter_config_mode(com: Receiver, attempts: int = 5, timeout_s: float = 3.0) -> bool:
+    """Manda INIT CONFIG e espera o ESP confirmar o modo de calibração.
+
+    O INIT CONFIG faz a tara da célula, então ela precisa estar SEM peso.
+    Antes da confirmação o ESP ainda pode estar transmitindo as linhas de
+    dados, por isso a resposta é procurada por até timeout_s segundos.
+    """
+    for attempt in range(attempts):
+        com.serial.reset_input_buffer()
+        com.send_command(b'INIT CONFIG\n')
+
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            line = com.read_response()
+            if 'Modo calibracao ativo' in line or 'Aguardando' in line:
+                print(f"[handshake] configMode confirmado na tentativa {attempt + 1}")
+                return True
+            if 'nao respondeu' in line:
+                print(f"[handshake] {line}")
+                break
+
+    return False
 
 def get_samples(com: Receiver, n_samples: int = 200) -> list[int]:
 

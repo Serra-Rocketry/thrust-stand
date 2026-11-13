@@ -1,13 +1,39 @@
 import sys
-from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PySide6.QtCore import QThread, Signal
 import fator_de_calibracao_cli as fact_cli
 import ui_fator_de_calibracao as fact_ui
 import logging
 
 
+class ConfigModeThread(QThread):
+    """Manda INIT CONFIG (que faz a tara) e espera o ESP confirmar o modo de calibração."""
+
+    confirmed = Signal()     # ESP entrou no modo de calibração
+    error     = Signal(str)  # mensagem de erro
+
+    def __init__(self, com: fact_cli.Receiver):
+        super().__init__()
+        self.com = com
+
+    def run(self):
+        try:
+            confirmed = fact_cli.enter_config_mode(self.com)
+        except Exception as e:
+            self.error.emit(str(e))
+            return
+
+        if confirmed:
+            self.confirmed.emit()
+        else:
+            self.error.emit('ESP não confirmou modo de calibração. Verifique a conexão.')
+
+
 class SamplerThread(QThread):
-    """Coleta amostras da serial em background, sem travar a UI."""
+    """Coleta amostras da serial em background, sem travar a UI.
+
+    O ESP já precisa estar no modo de calibração (ver ConfigModeThread).
+    """
 
     progress        = Signal(int)   # 0–100
     sample_received = Signal(int)   # valor de cada amostra
@@ -24,28 +50,7 @@ class SamplerThread(QThread):
         samples = []
         sample_count = 0
 
-        # Garante que o ESP está em configMode antes de coletar.
-        # Manda INIT CONFIG e aguarda a confirmação, com até 10 tentativas.
-        confirmed = False
-        for attempt in range(10):
-            self.com.serial.reset_input_buffer()
-            self.com.send_command(b'INIT CONFIG\n')
-            # Lê algumas linhas esperando a confirmação
-            for _ in range(5):
-                line = self.com.read_response()
-                print(f"[handshake] {repr(line)}")
-                if 'Aguardando' in line or 'CONFIG' in line.upper():
-                    confirmed = True
-                    break
-            if confirmed:
-                print(f"[handshake] configMode confirmado na tentativa {attempt + 1}")
-                break
-
-        if not confirmed:
-            self.error.emit('ESP não confirmou modo de calibração. Verifique a conexão.')
-            return
-
-        # Limpa qualquer lixo que chegou durante o handshake
+        # Descarta o que chegou enquanto o peso era colocado na célula
         self.com.serial.reset_input_buffer()
 
         try:
@@ -175,11 +180,32 @@ def extend_ui(ui):
         if state['thread'] is not None and state['thread'].isRunning():
             return
 
+        # 1) A tara (feita pelo INIT CONFIG) precisa ser feita SEM peso na célula
+        QMessageBox.information(
+            None, 'Calibração',
+            'Retire todo o peso da célula de carga e clique em OK.\n'
+            'O ESP vai fazer a tara (zerar) agora.')
+
         ui.btn_calcular.setEnabled(False)
-        ui.display_status.setText('Iniciando calibração...')
+        ui.display_status.setText('Fazendo a tara...')
         ui.progressBar.setValue(0)
 
-        thread = SamplerThread(com, n_samples=200)
+        thread = ConfigModeThread(com)
+        thread.confirmed.connect(on_config_mode)
+        thread.error.connect(on_error)
+        state['thread'] = thread
+        thread.start()
+
+    def on_config_mode():
+        # 2) Com a tara feita, o peso de referência pode ser colocado
+        QMessageBox.information(
+            None, 'Calibração',
+            f'Tara concluída.\n\nColoque o peso de {ui.lineEdit_4.text()} sobre a '
+            'célula de carga, espere estabilizar e clique em OK.')
+
+        ui.display_status.setText('Coletando amostras...')
+
+        thread = SamplerThread(state['com'], n_samples=200)
         thread.progress.connect(on_progress)
         thread.sample_received.connect(on_sample_received)
         thread.finished.connect(on_finished)

@@ -23,10 +23,14 @@ Este sistema é composto pelos seguintes componentes principais:
 
 3. **Calibração da Célula de Carga**:
 
-    - Coloque um peso conhecido na célula.
     - Execute a GUI: `python software/config-load-cell/fator_de_calibracao/fator_de_calibracao_main.py`
-    - Selecione a porta serial, clique em "Conectar" e depois em "Calcular".
+    - Selecione a porta serial, clique em "Conectar" e informe o "Peso Real" (em kg).
+    - Clique em "Calcular" e siga as duas mensagens:
+      1. **Retire todo o peso** da célula: o ESP faz a tara (comando `INIT CONFIG`).
+      2. **Coloque o peso de referência** e espere estabilizar: a GUI coleta 200 amostras.
     - Confirme/ajuste o valor e clique em "Enviar" para persistir no ESP32.
+
+    > ⚠️ Não coloque o peso antes de clicar em "Calcular": o `INIT CONFIG` faz a tara, e uma tara com peso em cima gera um fator errado.
 
 4. **Verificação Final**:
     - Reinicie o ESP32 e valide a leitura em `kgf` via Serial (o firmware faz log contínuo).
