@@ -37,7 +37,7 @@ python fator_de_calibracao_cli.py    # CLI
 
 ### Testing
 
-No test framework or test suite exists. The `tests/` directory is empty. If adding tests:
+No test framework or test suite exists, and there is no `tests/` directory yet. If adding tests, create it:
 
 - Python: use `pytest`. Run with `pytest tests/ -v` or a single test with `pytest tests/test_foo.py::test_bar -v`.
 - C++/Arduino: use PlatformIO test runner or Arduino CLI with a test sketch.

@@ -22,11 +22,11 @@ git clone https://github.com/ViniciusCMB/thrust-stand.git
 
 ```
 ├── 📂 docs/              # Documentação técnica detalhada
-├── 📂 extras/            # Códigos extras utilizados
+├── 📂 extras/            # Utilitários extras (ex.: configuração do rádio APC220)
 ├── 📂 firmware/          # Código do microcontrolador ESP32
 ├── 📂 hardware/          # Esquemáticos, PCBs e lista de componentes
 ├── 📂 software/          # Ferramentas de análise e interface
-└── 📂 tests/             # Testes unitários e de integração
+└── 📂 Legacy/            # Arquivos antigos que não são mais usados
 ```
 
 ## 🔧 Pré-requisitos
