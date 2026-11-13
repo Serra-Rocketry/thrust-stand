@@ -74,6 +74,7 @@ struct Amostra
 QueueHandle_t filaAmostras = NULL;      // Fila aquisição (núcleo 1) -> gravação (núcleo 0)
 File dataFile;                          // Arquivo de dados, aberto durante todo o teste
 volatile uint32_t amostrasPerdidas = 0; // Amostras descartadas por fila cheia
+volatile bool btTransmitindo = true;    // false após "BT OFF": BT só recebe 1 resumo por segundo
 
 enum StorageType { STORAGE_NONE, STORAGE_SD, STORAGE_LITTLEFS };
 StorageType storageType = STORAGE_NONE;
@@ -195,6 +196,20 @@ void processCommand(String command)
   if (command.equalsIgnoreCase("TARE"))
   {
     handleTare();
+    return;
+  }
+
+  if (command.equalsIgnoreCase("BT OFF"))
+  {
+    btTransmitindo = false;
+    printToSerials("Transmissao BT desligada. Enviando 1 resumo por segundo. Use BT ON para religar.");
+    return;
+  }
+
+  if (command.equalsIgnoreCase("BT ON"))
+  {
+    btTransmitindo = true;
+    printToSerials("Transmissao BT ligada.");
     return;
   }
 
@@ -515,9 +530,11 @@ bool startRecording()
 // Tarefa do núcleo 0: grava cada amostra da fila no arquivo (que fica
 // aberto) e transmite 1 a cada DECIMACAO por Serial/BT. Assim, uma demora
 // do cartão SD não atrasa a leitura dos sensores, que roda no núcleo 1.
+// Com "BT OFF", o BT recebe só um resumo por segundo.
 void recordingTask(void *param)
 {
   Amostra amostra;
+  Amostra ultima = {0, 0.0, 0.0};
   char linha[64];
   unsigned int contadorTransmissao = 0;
   unsigned long ultimoFlush = millis();
@@ -541,13 +558,15 @@ void recordingTask(void *param)
 
       if (amostra.empuxo > maxValues[0]) maxValues[0] = amostra.empuxo;
       if (amostra.pressao > maxValues[1]) maxValues[1] = amostra.pressao;
+      ultima = amostra;
 
       // A Serial a 115200 baud não comporta 500 linhas/s
       if (++contadorTransmissao >= DECIMACAO)
       {
         contadorTransmissao = 0;
         linha[tamanho - 1] = '\0'; // tira o '\n' (println já coloca)
-        printToSerials(String(linha));
+        Serial.println(linha);
+        if (btTransmitindo) SerialBT.println(linha);
       }
     }
 
@@ -562,6 +581,13 @@ void recordingTask(void *param)
       {
         perdidasAvisadas = amostrasPerdidas;
         printToSerials("AVISO: amostras perdidas (fila cheia): " + String(perdidasAvisadas));
+      }
+
+      if (!btTransmitindo && !configMode)
+      {
+        snprintf(linha, sizeof(linha), "Gravando t=%lus | %.2f kg (pico %.2f) | %.2f MPa",
+                 (unsigned long)(ultima.ms / 1000), ultima.empuxo, maxValues[0], ultima.pressao);
+        SerialBT.println(linha);
       }
     }
   }
