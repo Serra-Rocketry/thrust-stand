@@ -101,7 +101,7 @@ Certificado do fabricante com especificações completas da SZ51X-500kg.
 
 ## Resolução Estimada
 
-Com o HX711 (24 bits) ou ADS1232 na aquisição:
+Estimativa feita com o HX711 (24 bits) ou ADS1232 na aquisição. A aquisição agora usa o ADS1256 (24 bits, ganho 64, ~2147 contagens/kg teóricas); a resolução real deve ser remedida com a célula montada (ruído da leitura sem carga):
 
 - **Fundo de escala:** 4,9 kN (500 kgf)
 - **Resolução estimada:** ~0,5 N

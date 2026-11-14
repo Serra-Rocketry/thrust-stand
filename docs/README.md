@@ -50,7 +50,7 @@ Arquitetura do sistema:
 ```
 [Sensores] -> [ESP32] -> [Armazenamento] -> [Comunicação]
     |            |             |               |
- Célula/HX711  Process.      microSD        Serial/BT
+ Célula/ADS1256 Process.     microSD        Serial/BT
  Pressão       Dados         Arquivo CSV    Monitoramento
 ```
 
@@ -72,7 +72,8 @@ graph TD;
 ### Especificações do Sistema
 
 - Microcontrolador: ESP32
-- Sensores: célula de carga (HX711) e sensor de pressão analógico
+- Sensores: célula de carga e sensor de pressão analógico, ambos lidos pelo ADC ADS1256 (24 bits), e termopar tipo K (MAX31855)
+- Amostragem: 500 Hz (empuxo e pressão), 8 Hz (temperatura)
 - Armazenamento: cartão SD (SPI), com fallback para LittleFS
 - Comunicação: Serial USB e Bluetooth
 - Controles físicos:
